@@ -6,6 +6,7 @@ import { LiveRefresh } from "@/components/shell/live-refresh";
 import { AttentionActions } from "@/components/story/attention-actions";
 import { EnvironmentLogs } from "@/components/story/environment-logs";
 import { StoryActions } from "@/components/story/story-actions";
+import { StoryCompletionPanel } from "@/components/story/story-completion";
 import { StoryConsultationPanel } from "@/components/story/story-consultation";
 import { StoryConversation } from "@/components/story/story-conversation";
 import { StoryDeliveryPanel } from "@/components/story/story-delivery";
@@ -67,6 +68,9 @@ export default async function StoryPage({
   const permissions = me.ok ? me.data.permissions : [];
   const canExecute = can(permissions, "workspaces:execute");
   const canWrite = can(permissions, "projects:write");
+  const canConfigureIntegration = canWrite && can(permissions, "repos:write");
+  const canRecordIntegration = can(permissions, "stories:write");
+  const canComplete = canWrite && can(permissions, "github:write");
   const activeTurn =
     bundle.turns.find((turn) => turn.state === "running") ??
     bundle.turns.find((turn) => turn.state === "queued") ??
@@ -221,6 +225,16 @@ export default async function StoryPage({
         storyId={story.id}
         initial={bundle.previewConvergence}
         canExecute={canExecute && story.deletedAt === null}
+      />
+
+      <StoryCompletionPanel
+        projectId={projectId}
+        storyId={story.id}
+        initial={bundle.completion}
+        canConfigure={canConfigureIntegration}
+        canConfigureNotices={canWrite}
+        canRecord={canRecordIntegration}
+        canComplete={canComplete}
       />
 
       <StoryConsultationPanel
