@@ -183,13 +183,16 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
           logLevel: "silent",
         },
       });
-      await domain.variables.updateProject(f.scope, {
-        revision: "",
-        variables: {
-          OPENAI_API_KEY: "synthetic-project-provider-key",
-          UNRELATED_SECRET: "synthetic-unrelated-secret",
+      await domain.variables.updateProject(
+        { orgId: f.scope.orgId, projectId: f.scope.projectId },
+        {
+          revision: "",
+          variables: {
+            OPENAI_API_KEY: "synthetic-project-provider-key",
+            UNRELATED_SECRET: "synthetic-unrelated-secret",
+          },
         },
-      });
+      );
       const provider = vi.spyOn(globalThis, "fetch").mockImplementation(f.fetch);
       const beforeSession = await env.db
         .select()
