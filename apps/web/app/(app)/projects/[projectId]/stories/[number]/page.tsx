@@ -171,32 +171,39 @@ export default async function StoryPage({
           aria-label="Needs your attention"
         >
           <h2 className="mb-4 font-semibold">Needs your attention · {openAttention.length}</h2>
-          {openAttention.map((item) => (
-            <div key={item.id} className="border-t border-(--line) py-4">
-              <p className="font-medium">{item.title}</p>
-              <p className="mt-2 text-sm text-(--mut)">
-                {item.kind === "agent_waiting" ? item.detail : errorSummary(item.detail)}
-              </p>
-              {item.kind !== "agent_waiting" && item.detail ? (
-                <details className="mt-3 text-sm">
-                  <summary className="cursor-pointer">Technical details</summary>
-                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
-                    {item.detail}
-                  </pre>
-                </details>
-              ) : null}
-              {canExecute ? (
-                <AttentionActions
-                  projectId={projectId}
-                  storyId={story.id}
-                  item={item}
-                  agentName={
-                    bundle.turns.find((turn) => turn.id === item.turnId)?.agentName ?? null
-                  }
-                />
-              ) : null}
-            </div>
-          ))}
+          {openAttention.map((item) => {
+            const deliveryNotice = ["delivery_integration", "delivery_completion"].includes(
+              item.kind,
+            );
+            return (
+              <div key={item.id} className="border-t border-(--line) py-4">
+                <p className="font-medium">{item.title}</p>
+                <p className="mt-2 text-sm text-(--mut)">
+                  {item.kind === "agent_waiting" || deliveryNotice
+                    ? item.detail
+                    : errorSummary(item.detail)}
+                </p>
+                {item.kind !== "agent_waiting" && !deliveryNotice && item.detail ? (
+                  <details className="mt-3 text-sm">
+                    <summary className="cursor-pointer">Technical details</summary>
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
+                      {item.detail}
+                    </pre>
+                  </details>
+                ) : null}
+                {canExecute ? (
+                  <AttentionActions
+                    projectId={projectId}
+                    storyId={story.id}
+                    item={item}
+                    agentName={
+                      bundle.turns.find((turn) => turn.id === item.turnId)?.agentName ?? null
+                    }
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </section>
       ) : null}
 
