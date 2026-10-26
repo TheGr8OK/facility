@@ -463,6 +463,7 @@ export class StoryWorkspaceService {
     output: string;
     actor: StoryActor;
     metadata?: StoryMessageMetadata;
+    attention?: { title: string; detail: string };
   }) {
     return this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
@@ -497,10 +498,22 @@ export class StoryWorkspaceService {
           .where(and(eq(turns.orgId, input.orgId), eq(turns.id, turn.id)))
           .returning()
       )[0];
+      if (input.attention) {
+        await tx.insert(attentionItems).values({
+          id: newId("attn"),
+          orgId: input.orgId,
+          projectId: input.projectId,
+          storyId: turn.storyId,
+          turnId: turn.id,
+          kind: "agent_waiting",
+          title: input.attention.title,
+          detail: input.attention.detail,
+        });
+      }
       await tx
         .update(stories)
         .set({
-          status: lifecycleStatusAfterTurn(story.status, "working"),
+          status: lifecycleStatusAfterTurn(story.status, input.attention ? "attention" : "working"),
           activeAgentName: null,
           updatedAt: new Date(),
         })
@@ -586,7 +599,8 @@ export class StoryWorkspaceService {
           changed: false,
         };
       }
-      await releaseOpenTurnReservation(tx, input);
+      // A running provider may already have charged even when its dispatcher is lost.
+      if (turn.state === "queued") await releaseOpenTurnReservation(tx, input);
       const story = await scopedStory(tx, input.orgId, input.projectId, input.storyId);
       const remainingAttention = (
         await tx

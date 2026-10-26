@@ -76,6 +76,7 @@ export function StoryPlanPanel({
     searchTerm = useRef("");
   const textarea = useRef<HTMLTextAreaElement>(null),
     sourceNotice = useRef<HTMLDivElement>(null);
+  const draftMarkdown = useRef("");
   const observedHeads = useRef({
     revision: initial?.state.revision ?? 0,
     decisionRevision: initial?.state.decisionRevision ?? 0,
@@ -181,7 +182,8 @@ export function StoryPlanPanel({
       return;
     }
     setBaseRevision(value?.state.revision ?? 0);
-    setMarkdown(from?.markdown ?? value?.plan?.markdown ?? "");
+    draftMarkdown.current = from?.markdown ?? value?.plan?.markdown ?? "";
+    setMarkdown(draftMarkdown.current);
     setRepositories(value?.plan?.repositories.map((repo) => repo.repository) ?? []);
     setSelectedAgents(
       value?.plan?.agents.map((agent) => agent.name) ?? (defaultAgent ? [defaultAgent] : []),
@@ -281,11 +283,15 @@ export function StoryPlanPanel({
         return;
       }
       setCurrent((old) => newer(old, result.data));
-      setEditing(false);
+      const newerDraft = draftMarkdown.current !== markdown;
+      setEditing(newerDraft);
+      if (newerDraft) setBaseRevision(result.data.state.revision);
       setSource(undefined);
       retry.current = null;
       setNotice(
-        `Plan revision ${result.data.state.revision} recorded. Review it before confirming a decision.`,
+        newerDraft
+          ? `Plan revision ${result.data.state.revision} recorded. Your newer draft is still open and has not been saved.`
+          : `Plan revision ${result.data.state.revision} recorded. Review it before confirming a decision.`,
       );
       router.refresh();
     } else {
@@ -479,6 +485,7 @@ export function StoryPlanPanel({
               value={markdown}
               maxLength={100_000}
               onChange={(event) => {
+                draftMarkdown.current = event.target.value;
                 setMarkdown(event.target.value);
                 setSource(undefined);
               }}

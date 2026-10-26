@@ -403,6 +403,28 @@ describe("isolated consultation persistence and accounting", () => {
     ).toEqual([]);
   });
 
+  it("denies Haiku effort before creating a billable reservation or provider request", async () => {
+    const f = await env.fixture();
+    f.state.engine = "claude_code";
+    f.state.model = "claude-haiku-4-5";
+    await expect(f.service.request(f.scope, await f.body(), f.actor, "ui")).rejects.toMatchObject({
+      code: "reasoning_api_unsupported",
+    });
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(
+      await env.db
+        .select()
+        .from(storyConsultations)
+        .where(eq(storyConsultations.storyId, f.scope.storyId)),
+    ).toEqual([]);
+    expect(
+      await env.db
+        .select()
+        .from(budgetReservations)
+        .where(eq(budgetReservations.projectId, f.scope.projectId)),
+    ).toEqual([]);
+  });
+
   it("denies cross-project, cross-tenant and foreign-repository inputs without inference", async () => {
     const f = await env.fixture(),
       other = await env.fixture(env.otherOrgId);

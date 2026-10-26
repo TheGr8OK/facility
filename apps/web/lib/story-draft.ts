@@ -68,3 +68,22 @@ export function writeStoryDraft(key: string | null, draft: StoryDraft) {
     return false;
   }
 }
+
+/** A receipt owns only its submitted draft, including across navigation/remounts. */
+export function clearSentStoryDraft(key: string | null, attempt: StoryDraft) {
+  if (!key || !attempt.idempotencyKey) return false;
+  try {
+    const current = readStoredStoryDraft(key);
+    if (
+      !current ||
+      current.idempotencyKey !== attempt.idempotencyKey ||
+      current.agent !== attempt.agent ||
+      current.message !== attempt.message
+    )
+      return false;
+    sessionStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}

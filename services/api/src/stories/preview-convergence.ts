@@ -18,6 +18,7 @@ import {
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { ApiError } from "../errors.js";
 import type { PreviewEndpoint } from "../workspaces/runtime.js";
+import { reconciliationPage } from "../reconciliation.js";
 import { readStoryDelivery } from "./delivery.js";
 
 export type PreviewConvergenceScope = { orgId: string; projectId: string; storyId: string };
@@ -66,8 +67,33 @@ export class StoryPreviewConvergenceService {
   ) {}
 
   async observe(scope: PreviewConvergenceScope, now = new Date()) {
-    const delivery = await readStoryDelivery(this.db, scope, { now });
+    const result = await this.db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as FacilityDb;
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`facility:preview-convergence:${scope.orgId}:${scope.projectId}:${scope.storyId}`}))`,
+      );
+      return this.observeLocked(tx, scope, now);
+    });
+    if (result.recorded && result.enqueue) await this.enqueue(QUEUE, scope);
+    return result;
+  }
+
+  private async observeLocked(tx: FacilityDb, scope: PreviewConvergenceScope, now: Date) {
+    const delivery = await readStoryDelivery(tx, scope, { now });
     if (delivery.candidate.state !== "recorded" || !delivery.candidate.revision) {
+      // Retain the last good generation as history, but withdraw execution authority.
+      await tx
+        .update(storyPreviewConvergences)
+        .set({
+          state: sql`case when ${storyPreviewConvergences.state} = 'applying' and ${storyPreviewConvergences.leaseExpiresAt} > ${now.toISOString()}::timestamptz then 'applying' else 'blocked' end`,
+          desiredObservedAt: now,
+          errorCode: "preview_candidate_unavailable",
+          errorMessage: "The delivery no longer declares a complete preview candidate.",
+          retryAt: null,
+          revision: sql`${storyPreviewConvergences.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(convergenceWhere(scope));
       return { recorded: false as const, reason: delivery.candidate.state };
     }
     const repositories = delivery.pullRequests
@@ -90,11 +116,7 @@ export class StoryPreviewConvergenceService {
       );
     const sourceObservedAt = latestSourceObservation(delivery, now);
     const generation = delivery.candidate.revision;
-    const result = await this.db.transaction(async (rawTx) => {
-      const tx = rawTx as unknown as FacilityDb;
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext(${`facility:preview-convergence:${scope.orgId}:${scope.projectId}:${scope.storyId}`}))`,
-      );
+    const result = await (async () => {
       await tx
         .insert(storyPreviewGenerations)
         .values({
@@ -124,7 +146,14 @@ export class StoryPreviewConvergenceService {
       if (sourceObservedAt < current.desiredObservedAt) {
         return { changed: false, enqueue: false };
       }
-      if (current.desiredGeneration === generation) {
+      if (
+        current.desiredGeneration === generation &&
+        current.errorCode !== "preview_candidate_unavailable"
+      ) {
+        await tx
+          .update(storyPreviewConvergences)
+          .set({ desiredObservedAt: sourceObservedAt })
+          .where(convergenceWhere(scope));
         return {
           changed: false,
           enqueue:
@@ -162,8 +191,7 @@ export class StoryPreviewConvergenceService {
         })
         .where(convergenceWhere(scope));
       return { changed: true, enqueue: state === "pending" };
-    });
-    if (result.enqueue) await this.enqueue(QUEUE, scope);
+    })();
     return { recorded: true as const, generation, ...result };
   }
 
@@ -224,6 +252,19 @@ export class StoryPreviewConvergenceService {
           reason: "leased",
           retryAt: controller.leaseExpiresAt,
         };
+      const candidate = (await readStoryDelivery(tx, scope, { now })).candidate;
+      if (candidate.state !== "recorded" || candidate.revision !== controller.desiredGeneration) {
+        await tx
+          .update(storyPreviewConvergences)
+          .set({
+            state: "blocked",
+            errorCode: "preview_candidate_unavailable",
+            errorMessage: "A complete current delivery candidate is required.",
+            updatedAt: now,
+          })
+          .where(convergenceWhere(scope));
+        return { claimed: false, reason: "unconfigured" };
+      }
       if (controller.state === "applying" && controller.leaseToken) {
         await tx
           .update(storyPreviewAttempts)
@@ -400,17 +441,21 @@ export class StoryPreviewConvergenceService {
   }
 
   async reconcileObserved(now = new Date(), limit = 1_000) {
-    const scopes = await this.db
-      .select({
-        orgId: storyDeliveryScopes.orgId,
-        projectId: storyDeliveryScopes.projectId,
-        storyId: storyDeliveryScopes.storyId,
-      })
-      .from(storyDeliveryScopes)
-      .orderBy(asc(storyDeliveryScopes.updatedAt))
-      .limit(limit);
+    const scopes = await reconciliationPage(this.db, "preview-observations", (tx, after) =>
+      tx
+        .select({
+          id: storyDeliveryScopes.storyId,
+          orgId: storyDeliveryScopes.orgId,
+          projectId: storyDeliveryScopes.projectId,
+          storyId: storyDeliveryScopes.storyId,
+        })
+        .from(storyDeliveryScopes)
+        .where(after ? gt(storyDeliveryScopes.storyId, after) : undefined)
+        .orderBy(asc(storyDeliveryScopes.storyId))
+        .limit(limit),
+    );
     let recorded = 0;
-    for (const scope of scopes) {
+    for (const { id: _id, ...scope } of scopes) {
       const result = await this.observe(scope, now);
       if (result.recorded) recorded += 1;
     }
@@ -710,9 +755,16 @@ export class StoryPreviewConvergenceService {
       const owned =
         controller?.state === "applying" &&
         controller.leaseToken === input.leaseToken &&
-        controller.leaseGeneration === input.generation;
+        controller.leaseGeneration === input.generation &&
+        controller.leaseExpiresAt !== null &&
+        controller.leaseExpiresAt > now;
       if (!controller || !owned) return { settled: false as const, enqueue: false };
-      const superseded = controller.desiredGeneration !== input.generation;
+      const candidate = (await readStoryDelivery(tx, scope, { now })).candidate;
+      const unavailable = candidate.state !== "recorded";
+      const superseded =
+        unavailable ||
+        candidate.revision !== input.generation ||
+        controller.desiredGeneration !== input.generation;
       const attemptState = superseded ? "superseded" : outcome;
       await tx
         .update(storyPreviewAttempts)
@@ -731,7 +783,9 @@ export class StoryPreviewConvergenceService {
           ),
         );
       const state: StoryPreviewConvergenceState = superseded
-        ? "pending"
+        ? unavailable
+          ? "blocked"
+          : "pending"
         : outcome === "succeeded"
           ? "ready"
           : outcome;
@@ -783,7 +837,7 @@ export class StoryPreviewConvergenceService {
           updatedAt: now,
         })
         .where(convergenceWhere(scope));
-      return { settled: true as const, superseded, enqueue: superseded };
+      return { settled: true as const, superseded, enqueue: superseded && !unavailable };
     });
   }
 }
