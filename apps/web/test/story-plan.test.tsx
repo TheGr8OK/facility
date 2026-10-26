@@ -496,3 +496,29 @@ describe("interactive confirmation UI", () => {
     ).toBe(false);
   });
 });
+
+describe("newer plan drafts during save", () => {
+  it("keeps a newer unsaved draft when an older proposal finishes saving", async () => {
+    await render(snapshot(0));
+    await click("Propose plan");
+    await type("Submitted text A");
+    let release: (value: Response) => void = () => {
+      throw Error("No pending request");
+    };
+    fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await click("Save plan proposal");
+    expect(body().markdown).toBe("Submitted text A");
+    expect(textarea().disabled).toBe(false);
+    await type("Newer unsaved text B");
+    expect(textarea().value).toBe("Newer unsaved text B");
+    const saved = snapshot();
+    if (saved.plan) saved.plan.markdown = "Submitted text A";
+    await act(async () => release(Response.json(saved)));
+    expect(textarea().value).toBe("Newer unsaved text B");
+  });
+});
