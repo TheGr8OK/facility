@@ -2,6 +2,10 @@ export class PreviewLeaseLostError extends Error {
   readonly code = "preview_lease_lost";
 }
 
+export class PreviewComputeStopError extends Error {
+  readonly code = "preview_compute_stop_unconfirmed";
+}
+
 /** Renew independently of long commands; stop compute before returning a lost lease. */
 export async function withPreviewLease<T>(
   renew: () => Promise<Date | null>,
@@ -17,7 +21,9 @@ export async function withPreviewLease<T>(
   const lose = () => {
     if (finished || controller.signal.aborted) return;
     controller.abort(new PreviewLeaseLostError("Preview writer authority was lost"));
-    stopping = stop();
+    stopping = stop().catch((cause) => {
+      throw new PreviewComputeStopError("Preview compute stop was not confirmed", { cause });
+    });
     // The error is awaited after the command has stopped; avoid an unhandled rejection.
     void stopping.catch(() => undefined);
   };

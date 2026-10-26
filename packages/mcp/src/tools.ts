@@ -143,7 +143,7 @@ export const toolDefinitions: ToolDefinition[] = [
     name: "facility_set_delivery",
     permission: "projects:write",
     description:
-      "Replace a story's delivery PR links from its project's GitHub mirror. Read the current scope revision first; declare completeness explicitly and choose one required primary. This records metadata only; it does not accept work, merge PRs or run agents. Needs projects:write.",
+      "Replace a story's delivery PR links from its project's GitHub mirror. Read the current scope revision first; declare completeness explicitly and choose one required primary. With workspaces:execute, saving also authorizes automatic preview updates for this scope revision: the worker may fetch Git commits, change managed workspace code and rebuild/restart the application while retaining data. Without that permission, it only records delivery metadata. It does not accept work, merge PRs or run AI agents. Needs projects:write.",
     inputSchema: {
       projectId,
       storyId,
@@ -164,6 +164,7 @@ export const toolDefinitions: ToolDefinition[] = [
       }),
     idempotencyKey: (args) => stringValue(args.idempotencyKey),
     write: true,
+    openWorld: true,
   },
   {
     name: "facility_get_delivery_integration_policy",

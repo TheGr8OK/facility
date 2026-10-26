@@ -103,6 +103,16 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
       expect(await run("cat README.md", "repos/acme/app")).toBe("second generation");
       expect(await run("cat local-data.txt", "repos/acme/app")).toBe("retained user data");
       expect((await runtime.inspect(workspace)).volumeRef).toBe(workspace.volumeRef);
+      const oldTarget = { ...workspace, expectedComputeRef: workspace.computeRef };
+      await runtime.retireCompute(oldTarget);
+      const replacement = await runtime.wake(workspace);
+      expect(replacement.computeRef).not.toBe(oldTarget.expectedComputeRef);
+      await runtime.suspend(oldTarget);
+      expect((await runtime.inspect(workspace)).state).toBe("running");
+      await expect(runtime.exec(oldTarget, { command: "true" })).rejects.toMatchObject({
+        code: "workspace_not_running",
+      });
+      expect(await run("cat local-data.txt", "repos/acme/app")).toBe("retained user data");
     } finally {
       await runtime.destroy(workspace);
     }

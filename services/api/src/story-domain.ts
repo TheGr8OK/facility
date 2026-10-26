@@ -254,6 +254,9 @@ class UnsupportedWorkspaceRuntime implements WorkspaceRuntime {
   suspend(): never {
     return this.unavailable();
   }
+  retireCompute(): never {
+    return this.unavailable();
+  }
   destroy(): never {
     return this.unavailable();
   }

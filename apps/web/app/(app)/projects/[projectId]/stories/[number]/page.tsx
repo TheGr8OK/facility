@@ -225,6 +225,7 @@ export default async function StoryPage({
         storyId={story.id}
         initial={bundle.delivery}
         canWrite={canWrite}
+        canExecute={canExecute}
       />
 
       <StoryPreviewConvergencePanel
