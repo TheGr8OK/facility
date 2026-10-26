@@ -51,7 +51,7 @@ model, trigger, and native session reference used.
 When a message arrives during active work, it stays queued. Facility promotes it only after the
 current turn reaches a terminal state. A failed worker can reclaim dispatch work without creating
 a second active turn. Retrying a failed attention item creates a new attempt while preserving the
-failed attempt as history.
+failed attempt as history. Interrupted-worker recovery confirms native process termination before releasing the writer. If termination cannot be verified, the original turn stays fenced for a later retry; other stories can still recover. Native CLI groups and legacy per-turn processes are checked independently of the journal monitor.
 
 Agents share the conversation and files, but each turn still records which agent ran. Changing
 from `architect` to `builder` does not create another workspace or copy a summary into a separate

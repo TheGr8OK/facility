@@ -570,11 +570,13 @@ export class StoryWorkspaceService {
   }) {
     const result = await this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
-      const turn = await scopedTurn(tx, input.orgId, input.projectId, input.turnId);
+      await lockStory(tx, input.orgId, input.projectId, input.storyId);
+      // Admission updates this same row before reserving provider spending. Keep
+      // its queued/running classification stable through cancellation and release.
+      const turn = await scopedTurn(tx, input.orgId, input.projectId, input.turnId, true);
       if (turn.storyId !== input.storyId) {
         throw new StoryServiceError("turn_not_found", "turn not found", 404);
       }
-      await lockStory(tx, input.orgId, input.projectId, input.storyId);
       if (["succeeded", "failed", "canceled"].includes(turn.state)) {
         return { turn, changed: false };
       }
@@ -648,6 +650,7 @@ export class StoryWorkspaceService {
     turnId: string;
     staleBefore: Date;
   }) {
+    let processCleanup = "workspace unavailable";
     const recovered = await this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
       const turn = await scopedTurn(tx, input.orgId, input.projectId, input.turnId);
@@ -675,6 +678,50 @@ export class StoryWorkspaceService {
           .returning()
       )[0];
       if (!updated) return undefined;
+      // Keep failure uncommitted and retain the story/turn writer locks until the
+      // native process is confirmed stopped. A failed cleanup rolls this back.
+      const evidence = (
+        await tx
+          .select({ workspaceId: turnGitEvidence.workspaceId })
+          .from(turnGitEvidence)
+          .where(
+            and(
+              eq(turnGitEvidence.orgId, input.orgId),
+              eq(turnGitEvidence.projectId, input.projectId),
+              eq(turnGitEvidence.turnId, turn.id),
+            ),
+          )
+          .limit(1)
+      )[0];
+      const workspace = (
+        await tx
+          .select()
+          .from(workspaces)
+          .where(
+            and(
+              eq(workspaces.orgId, input.orgId),
+              eq(workspaces.projectId, input.projectId),
+              eq(workspaces.storyId, turn.storyId),
+              ...(evidence?.workspaceId ? [eq(workspaces.id, evidence.workspaceId)] : []),
+            ),
+          )
+          .orderBy(desc(workspaces.createdAt))
+          .limit(1)
+      )[0];
+      if (workspace?.externalRef) {
+        processCleanup = await stopInterruptedEngineProcess(
+          this.runtime,
+          locatorFromRow(workspace),
+          turn.id,
+        );
+        if (!["stopped", "absent", "stale-marker"].includes(processCleanup))
+          throw new StoryServiceError(
+            "turn_cleanup_unconfirmed",
+            "The native writer has not stopped",
+            409,
+          );
+      }
+
       // Book uncertainty before committing failure or admitting a successor. A
       // legacy turn without phase evidence may already have charged its provider.
       const phases = await tx
@@ -726,7 +773,6 @@ export class StoryWorkspaceService {
     });
     if (!recovered) return false;
 
-    let processCleanup = "workspace unavailable";
     try {
       const evidence = (
         await this.db
@@ -757,11 +803,6 @@ export class StoryWorkspaceService {
           .limit(1)
       )[0];
       if (workspace?.externalRef) {
-        processCleanup = await stopInterruptedEngineProcess(
-          this.runtime,
-          locatorFromRow(workspace),
-          recovered.id,
-        );
         if (recovered.mayHaveSpent) {
           const measured = await readUsageJournal(
             this.runtime,
@@ -2465,14 +2506,19 @@ async function scopedStory(db: FacilityDb, orgId: string, projectId: string, sto
   return story;
 }
 
-async function scopedTurn(db: FacilityDb, orgId: string, projectId: string, turnId: string) {
-  const turn = (
-    await db
-      .select()
-      .from(turns)
-      .where(and(eq(turns.orgId, orgId), eq(turns.projectId, projectId), eq(turns.id, turnId)))
-      .limit(1)
-  )[0];
+async function scopedTurn(
+  db: FacilityDb,
+  orgId: string,
+  projectId: string,
+  turnId: string,
+  lock = false,
+) {
+  const query = db
+    .select()
+    .from(turns)
+    .where(and(eq(turns.orgId, orgId), eq(turns.projectId, projectId), eq(turns.id, turnId)))
+    .limit(1);
+  const [turn] = await (lock ? query.for("update") : query);
   if (!turn) throw new StoryServiceError("turn_not_found", "turn not found", 404);
   return turn;
 }
