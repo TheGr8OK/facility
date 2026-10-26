@@ -35,13 +35,16 @@ for (const pid of markerPids.filter(Boolean)) {
 // The usage monitor starts the native CLI in its own process group. Legacy
 // monitor/CLI markers are also handled through exact per-turn environment tags.
 const nativeGroup = markerPids[1];
+// A reduced-environment orphan may still own the group. A numeric stale
+// marker cannot authenticate it; ask the provider to fence this workspace.
+const requiresComputeFence = nativeGroup && initial.some(item => item.group === nativeGroup) && !initial.some(item => item.owned && item.group === nativeGroup);
 const groups = new Set(nativeGroup && initial.some(item => item.owned && item.group === nativeGroup) ? [nativeGroup] : []);
 const targets = () => snapshot().filter(item => item.owned || groups.has(item.group));
 const beganActive = targets().length > 0;
 function signal(name) {
   const current = targets();
   for (const group of groups) {
-    if (!current.some(item => item.group === group && item.owned)) continue;
+    if (!current.some(item => item.group === group && item.owned)) return false;
     try { process.kill(-group, name); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
   for (const item of current) {
@@ -50,6 +53,7 @@ function signal(name) {
     if (!fresh?.owned || fresh.state === 'Z') continue;
     try { process.kill(item.pid, name); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
+  return true;
 }
 async function waitUntilStopped() {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -59,9 +63,9 @@ async function waitUntilStopped() {
   return !targets().length;
 }
 async function run() {
-  signal('SIGTERM');
+  if (requiresComputeFence || !signal('SIGTERM')) { process.stdout.write('compute-fence-required'); return; }
   if (!(await waitUntilStopped())) {
-    signal('SIGKILL');
+    if (!signal('SIGKILL')) { process.stdout.write('compute-fence-required'); return; }
     if (!(await waitUntilStopped())) throw new Error('Native writer stop is unconfirmed');
   }
   for (const file of markers) { try { fs.unlinkSync(file); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
