@@ -198,7 +198,7 @@ terminal results are rejected. Manual integration uses a null event ID.
 
 Before the bounded GitHub close request, Facility rechecks the current candidate, integration,
 source binding and requesting principal. Delivery/policy mutations and local mirror updates are
-fenced through that request. Closing an issue, suspending compute and retaining storage remain
+fenced through that request. A close response cannot replace a newer source observation, including a same-timestamp reopen. When the source changes, completion fails visibly and requires a fresh explicit request; automatic recovery cannot close it again. Closing an issue, suspending compute and retaining storage remain
 separate recorded results; this action does not merge PRs or delete persistent storage.
 
 ## Inspect and test the environment

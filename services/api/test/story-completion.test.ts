@@ -1,6 +1,10 @@
 import type { StoryCompletion } from "@facility/core";
 import { describe, expect, it } from "vitest";
-import { storyCompletionNextAction, storyDeliveryNotice } from "../src/stories/completion.js";
+import {
+  completionCloseObservation,
+  storyCompletionNextAction,
+  storyDeliveryNotice,
+} from "../src/stories/completion.js";
 
 const scope = { orgId: "org_one", projectId: "proj_one", storyId: "story_one" };
 
@@ -145,5 +149,38 @@ describe("story completion projection", () => {
     const pending = projection({ completion: { state: "pending" } });
     pending.nextAction = "wait_completion";
     expect(storyDeliveryNotice(scope, pending)).toBeNull();
+  });
+});
+
+describe("completion close observations", () => {
+  it("orders the result by updated_at while preserving the closure date", () => {
+    expect(
+      completionCloseObservation(
+        {
+          number: 7,
+          state: "closed",
+          closed_at: "2026-10-26T10:00:00Z",
+          updated_at: "2026-10-26T10:01:00Z",
+        },
+        7,
+      ),
+    ).toEqual({
+      closedAt: new Date("2026-10-26T10:00:00Z"),
+      updatedAt: new Date("2026-10-26T10:01:00Z"),
+    });
+  });
+  it.each([
+    null,
+    { number: 8, state: "closed" },
+    { number: 7, state: "open" },
+    { number: 7, state: "closed", updated_at: "invalid" },
+    {
+      number: 7,
+      state: "closed",
+      closed_at: "2026-10-26T10:01:00Z",
+      updated_at: "2026-10-26T10:00:00Z",
+    },
+  ])("rejects an unverifiable close result: %j", (data) => {
+    expect(() => completionCloseObservation(data, 7)).toThrow("github_completion_unverified");
   });
 });

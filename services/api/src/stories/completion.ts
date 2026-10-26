@@ -25,7 +25,7 @@ import {
   turns,
   workspaces,
 } from "@facility/db";
-import { and, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { authorizePrincipal } from "../auth/workspace-execution.js";
 import { ApiError } from "../errors.js";
 import type { GithubClientFactory } from "../github/client.js";
@@ -649,6 +649,10 @@ export class StoryCompletionService {
         and(
           completionWhere(scope),
           inArray(storyCompletionOperations.state, ["pending", "failed"]),
+          or(
+            isNull(storyCompletionOperations.errorCode),
+            ne(storyCompletionOperations.errorCode, "completion_source_changed"),
+          ),
           lte(storyCompletionOperations.nextAttemptAt, now),
           or(
             isNull(storyCompletionOperations.leaseUntil),
@@ -738,6 +742,8 @@ export class StoryCompletionService {
         )
           throw new Error("source_issue_changed");
         if (source.issue.state !== "closed") {
+          if (source.issue.githubUpdatedAt && source.issue.githubUpdatedAt > operation.requestedAt)
+            throw new Error("completion_source_changed");
           if (!githubRequest) throw new Error("github_requests_unavailable");
           const response = await githubRequest(
             "PATCH /repos/{owner}/{repo}/issues/{issue_number}",
@@ -750,19 +756,13 @@ export class StoryCompletionService {
               request: { timeout: 10_000, retries: 0, signal: AbortSignal.timeout(10_000) },
             },
           );
-          const result = response.data as Record<string, unknown>;
-          if (result.state !== "closed" || result.number !== source.issue.number)
-            throw new Error("github_completion_unverified");
-          const closedAt =
-            typeof result.closed_at === "string" && Number.isFinite(Date.parse(result.closed_at))
-              ? new Date(result.closed_at)
-              : new Date();
-          await service.db
+          const observation = completionCloseObservation(response.data, source.issue.number);
+          const [saved] = await service.db
             .update(githubIssues)
             .set({
               state: "closed",
-              closedAt,
-              githubUpdatedAt: closedAt,
+              closedAt: observation.closedAt,
+              githubUpdatedAt: observation.updatedAt,
               syncedAt: new Date(),
               updatedAt: new Date(),
             })
@@ -771,8 +771,15 @@ export class StoryCompletionService {
                 eq(githubIssues.orgId, scope.orgId),
                 eq(githubIssues.projectId, scope.projectId),
                 eq(githubIssues.id, source.issue.id),
+                sql`${githubIssues}.xmin::text = ${source.sourceVersion}`,
+                or(
+                  isNull(githubIssues.githubUpdatedAt),
+                  lte(githubIssues.githubUpdatedAt, observation.updatedAt),
+                ),
               ),
-            );
+            )
+            .returning({ id: githubIssues.id });
+          if (!saved) throw new Error("completion_source_changed");
         }
       });
       await this.storiesService.reconcileIssue(scope.orgId, scope.projectId, scope.storyId);
@@ -890,6 +897,10 @@ export class StoryCompletionService {
         .where(
           and(
             or(inArray(storyCompletionOperations.state, ["pending", "failed"])),
+            or(
+              isNull(storyCompletionOperations.errorCode),
+              ne(storyCompletionOperations.errorCode, "completion_source_changed"),
+            ),
             lte(storyCompletionOperations.nextAttemptAt, now),
           ),
         ),
@@ -1102,6 +1113,7 @@ export class StoryCompletionService {
     const [row] = await this.db
       .select({
         issue: githubIssues,
+        sourceVersion: sql<string>`${githubIssues}.xmin::text`,
         repository: projectRepositories,
         installationId: githubInstallations.installationId,
       })
@@ -1134,6 +1146,7 @@ export class StoryCompletionService {
     if (!row) throw new Error("source_issue_unavailable");
     return {
       issue: row.issue,
+      sourceVersion: row.sourceVersion,
       repository: { ...row.repository, installationId: row.installationId },
     };
   }
@@ -1338,3 +1351,20 @@ const completionWhere = (scope: Scope) =>
     eq(storyCompletionOperations.projectId, scope.projectId),
     eq(storyCompletionOperations.storyId, scope.storyId),
   );
+
+/** GitHub's observation time orders source events; closed_at only dates closure. */
+export function completionCloseObservation(data: unknown, number: number) {
+  const result = data as Record<string, unknown> | null;
+  if (result?.state !== "closed" || result.number !== number)
+    throw new Error("github_completion_unverified");
+  const date = (value: unknown, fallback: Date) => {
+    if (value === undefined || value === null) return fallback;
+    if (typeof value !== "string" || !Number.isFinite(Date.parse(value)))
+      throw new Error("github_completion_unverified");
+    return new Date(value);
+  };
+  const closedAt = date(result.closed_at, new Date());
+  const updatedAt = date(result.updated_at, closedAt);
+  if (updatedAt < closedAt) throw new Error("github_completion_unverified");
+  return { closedAt, updatedAt };
+}

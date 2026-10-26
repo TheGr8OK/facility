@@ -1021,4 +1021,80 @@ describe("durable delivery integration, notices and source completion", () => {
     });
     expect(request).not.toHaveBeenCalled();
   });
+  it.each([
+    "later timestamp",
+    "same timestamp",
+  ])("preserves a newer source reopen received during the close response: %s", async (timing) => {
+    const f = await reviewFixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const closedAt = new Date(Date.now() - 1_000).toISOString();
+    const reopenedAt =
+      timing === "same timestamp" ? closedAt : new Date(Date.now() + 1_000).toISOString();
+    let remoteState = "open";
+    const request = vi.fn(async () => {
+      remoteState = "closed";
+      entered();
+      await gate;
+      return { data: { number: 99, state: "closed", closed_at: closedAt, updated_at: closedAt } };
+    });
+    const service = new StoryCompletionService(
+      db,
+      async () => ({ request, rest: {} }) as unknown as Octokit,
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    const running = service.dispatchCompletion(f.scope);
+    await waiting;
+    remoteState = "open";
+    const reopened = domain.mirror.handleWebhook({
+      id: randomUUID(),
+      orgId,
+      projectId: f.scope.projectId,
+      repositoryId: f.repositoryId,
+      eventType: "issues",
+      payload: {
+        action: "reopened",
+        repository: { full_name: `example/${f.name}` },
+        issue: {
+          number: 99,
+          title: "Source reopened after accepted close",
+          state: "open",
+          html_url: `https://github.com/example/${f.name}/issues/99`,
+          updated_at: reopenedAt,
+          closed_at: null,
+        },
+      },
+    });
+    try {
+      await vi.waitFor(async () => {
+        const [observed] = await db
+          .select()
+          .from(githubIssues)
+          .where(eq(githubIssues.id, f.issueId));
+        expect(observed?.githubUpdatedAt?.toISOString()).toBe(reopenedAt);
+        expect(observed?.state).toBe("open");
+      });
+    } finally {
+      release();
+    }
+    const outcome = await running;
+    await reopened;
+    const [observed] = await db.select().from(githubIssues).where(eq(githubIssues.id, f.issueId));
+    const [story] = await db.select().from(stories).where(eq(stories.id, f.scope.storyId));
+    expect(outcome).toMatchObject({ state: "failed", errorCode: "completion_source_changed" });
+    expect(story?.status).not.toBe("done");
+    expect(await service.dispatchCompletion(f.scope, new Date(Date.now() + 3600000))).toEqual({
+      claimed: false,
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(observed?.state).toBe(remoteState);
+    expect(observed?.githubUpdatedAt?.toISOString()).toBe(reopenedAt);
+  });
 });
