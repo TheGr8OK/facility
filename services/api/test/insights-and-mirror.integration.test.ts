@@ -18,6 +18,8 @@ import {
   projects,
   stories,
   storyConversations,
+  storyDeliveryPullRequests,
+  storyDeliveryScopes,
   storyEvidenceEvents,
   turnGitEvidence,
   turns,
@@ -542,6 +544,78 @@ describe("cost controls, GitHub mirror, and backlog", async () => {
         target: { type: "project", id: projectId },
       }),
     ).rejects.toMatchObject({ cause: { code: "23503" } });
+  });
+
+  it("hydrates and refreshes reviews for a delivery-only child without changing source authority", async () => {
+    const number = 1245,
+      head = "f".repeat(40);
+    const pull = {
+      number,
+      title: "Required child",
+      state: "open",
+      draft: false,
+      head: { ref: "external/child-only", sha: head },
+      base: { ref: "main" },
+      html_url: "https://github.com/acme/app/pull/1245",
+      updated_at: new Date().toISOString(),
+    };
+    let reviewState = "APPROVED";
+    const request = vi.fn(async (route: string) => {
+      if (route.endsWith("/branches") || route.endsWith("/issues")) return { data: [] };
+      if (route.endsWith("/pulls")) return { data: [pull] };
+      if (route.endsWith("/reviews"))
+        return {
+          data: [
+            {
+              id: 12450,
+              state: reviewState,
+              commit_id: head,
+              user: { login: "reviewer" },
+              submitted_at: new Date().toISOString(),
+            },
+          ],
+        };
+      if (route.endsWith("/status")) return { data: { state: "success", statuses: [] } };
+      if (route.endsWith("/check-runs")) return { data: { check_runs: [] } };
+      throw Error(route);
+    });
+    const mirror = new GithubMirrorService(db, async () => ({ request, rest: {} as never }));
+    await mirror.syncProject(orgId, projectId);
+    expect(request.mock.calls.filter(([route]) => route.endsWith("/reviews"))).toHaveLength(0);
+    await db.insert(storyDeliveryScopes).values({
+      orgId,
+      projectId,
+      storyId,
+      revision: 1,
+      declaredComplete: true,
+      updatedBy: { type: "user", id: "maintainer" },
+    });
+    await db.insert(storyDeliveryPullRequests).values({
+      orgId,
+      projectId,
+      storyId,
+      repositoryId,
+      pullNumber: number,
+      required: true,
+      isPrimary: true,
+    });
+    await mirror.syncProject(orgId, projectId);
+    expect(request.mock.calls.filter(([route]) => route.endsWith("/reviews"))).toHaveLength(1);
+    reviewState = "DISMISSED";
+    await mirror.syncProject(orgId, projectId);
+    const [review] = await db
+      .select()
+      .from(githubPullRequestReviews)
+      .where(
+        and(
+          eq(githubPullRequestReviews.repositoryId, repositoryId),
+          eq(githubPullRequestReviews.reviewId, "12450"),
+        ),
+      );
+    expect(review?.state).toBe("dismissed");
+    const [source] = await db.select().from(stories).where(eq(stories.id, storyId));
+    expect(source?.pullRequestNumber).not.toBe(number);
+    expect(request.mock.calls.filter(([route]) => route.endsWith("/reviews"))).toHaveLength(2);
   });
 
   it("periodically reconciles external branch, review, and check changes", async () => {
