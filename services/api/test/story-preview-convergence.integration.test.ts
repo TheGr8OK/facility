@@ -6,6 +6,7 @@ import {
   migrate,
   projectRepositories,
   projects,
+  reconciliationCursors,
   seed,
   stories,
   storyConversations,
@@ -257,5 +258,113 @@ describe("durable story preview convergence", () => {
     ).toHaveLength(2);
     await expect(service.retry(scope, new Date(now.getTime() + 2_000))).resolves.toBe(true);
     expect((await service.read(scope))?.state).toBe("pending");
+  });
+  it("rejects expired success and failure even before another worker reclaims", async () => {
+    const now = new Date();
+    const { scope } = await fixture(now);
+    const service = new StoryPreviewConvergenceService(db, async () => undefined, 1000);
+    await service.observe(scope, now);
+    const claim = await service.claim(scope, now);
+    if (!claim.claimed) throw Error("Missing claim");
+    const late = new Date(now.getTime() + 1001);
+    expect(await service.complete(scope, claim, late)).toEqual({ settled: false, enqueue: false });
+    expect(
+      await service.fail(
+        scope,
+        { ...claim, outcome: "failed", code: "late", message: "late" },
+        late,
+      ),
+    ).toEqual({ settled: false, enqueue: false });
+    expect((await service.read(scope))?.deployedGeneration).toBeNull();
+  });
+
+  it("advances the same-generation watermark and rejects delayed intermediate heads", async () => {
+    const now = new Date(Date.now() + 1000);
+    const { scope, repositoryId } = await fixture(now);
+    const service = new StoryPreviewConvergenceService(db, async () => undefined);
+    const first = await service.observe(scope, now);
+    await db
+      .update(githubPullRequests)
+      .set({ syncedAt: new Date(now.getTime() + 3000) })
+      .where(eq(githubPullRequests.repositoryId, repositoryId));
+    await service.observe(scope, new Date(now.getTime() + 3000));
+    await db
+      .update(githubPullRequests)
+      .set({ headSha: "b".repeat(40), syncedAt: new Date(now.getTime() + 2000) })
+      .where(eq(githubPullRequests.repositoryId, repositoryId));
+    expect(await service.observe(scope)).toMatchObject({ recorded: true, changed: false });
+    expect((await service.read(scope))?.desired.generation).toBe(
+      first.recorded ? first.generation : null,
+    );
+  });
+
+  it("withdraws execution without deleting history or releasing an active writer prematurely", async () => {
+    const now = new Date();
+    const { scope } = await fixture(now);
+    const service = new StoryPreviewConvergenceService(db, async () => undefined);
+    await service.observe(scope, now);
+    const claim = await service.claim(scope, now);
+    if (!claim.claimed) throw Error("Missing claim");
+    await db
+      .update(storyDeliveryScopes)
+      .set({ declaredComplete: false, updatedAt: new Date(now.getTime() + 1) })
+      .where(eq(storyDeliveryScopes.storyId, scope.storyId));
+    expect(await service.observe(scope)).toMatchObject({ recorded: false });
+    expect((await service.read(scope))?.state).toBe("applying");
+    expect(await service.claim(scope, now)).toMatchObject({ claimed: false, reason: "leased" });
+    expect(await service.complete(scope, claim)).toMatchObject({
+      settled: true,
+      superseded: true,
+      enqueue: false,
+    });
+    expect((await service.read(scope))?.state).toBe("blocked");
+    await service.retry(scope);
+    expect(await service.claim(scope)).toMatchObject({ claimed: false, reason: "unconfigured" });
+    expect(
+      await db
+        .select()
+        .from(storyPreviewGenerations)
+        .where(eq(storyPreviewGenerations.storyId, scope.storyId)),
+    ).toHaveLength(1);
+  });
+
+  it("advances durable observation pages past a thousand unchanged scopes", async () => {
+    const { scope } = await fixture();
+    const prefix = `zz_reconcile_${randomUUID()}_`;
+    const ids = Array.from({ length: 1001 }, (_, i) => `${prefix}${String(i).padStart(4, "0")}`);
+    await db.insert(stories).values(
+      ids.map((id) => ({
+        id,
+        orgId: scope.orgId,
+        projectId: scope.projectId,
+        provider: "manual",
+        externalId: id,
+        title: "Unchanged scope",
+        createdBy: { type: "user", id: "user_local_admin" },
+      })),
+    );
+    await db.insert(storyDeliveryScopes).values(
+      ids.map((storyId) => ({
+        orgId: scope.orgId,
+        projectId: scope.projectId,
+        storyId,
+        revision: 1,
+        declaredComplete: false,
+        updatedBy: { type: "user", id: "user_local_admin" },
+      })),
+    );
+    await db
+      .insert(reconciliationCursors)
+      .values({ name: "preview-observations", lastId: prefix })
+      .onConflictDoUpdate({ target: reconciliationCursors.name, set: { lastId: prefix } });
+    const service = new StoryPreviewConvergenceService(db, async () => undefined);
+    const observe = vi
+      .spyOn(service, "observe")
+      .mockResolvedValue({ recorded: false, reason: "incomplete" } as never);
+    await service.reconcileObserved();
+    expect(observe).toHaveBeenCalledTimes(1000);
+    expect(observe.mock.calls.some(([s]) => s.storyId === ids[1000])).toBe(false);
+    await service.reconcileObserved();
+    expect(observe.mock.calls.some(([s]) => s.storyId === ids[1000])).toBe(true);
   });
 });
