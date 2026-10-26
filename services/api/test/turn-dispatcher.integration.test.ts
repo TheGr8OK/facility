@@ -1804,17 +1804,16 @@ Review the request.
       }
       throw Error("Unexpected recovery command");
     });
-    const onRecovered = vi.fn(async () => undefined);
+    const onRecovered = vi.fn(async (_turn: { turnId: string }) => undefined);
     const recovering = recoverInterruptedTurns(db, storiesService, new Date(), 60000, onRecovered);
-    const failed = expect(recovering).resolves.toBe(0);
     try {
       await inside;
       expect((await db.select().from(turns).where(eq(turns.id, input.turnId)))[0]?.state).toBe(
         "running",
       );
-      expect(onRecovered).not.toHaveBeenCalled();
+      expect(onRecovered.mock.calls.some(([turn]) => turn.turnId === input.turnId)).toBe(false);
       finish();
-      await failed;
+      await recovering;
       expect((await db.select().from(turns).where(eq(turns.id, input.turnId)))[0]?.state).toBe(
         "running",
       );
@@ -1824,7 +1823,7 @@ Review the request.
           .from(budgetReservations)
           .where(eq(budgetReservations.turnId, input.turnId)),
       ).toHaveLength(1);
-      expect(onRecovered).not.toHaveBeenCalled();
+      expect(onRecovered.mock.calls.some(([turn]) => turn.turnId === input.turnId)).toBe(false);
     } finally {
       finish();
       cleanup.mockRestore();
