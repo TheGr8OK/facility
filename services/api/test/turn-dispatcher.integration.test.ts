@@ -23,7 +23,7 @@ import {
   turnUsage,
   workspaces,
 } from "@facility/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentCatalogService, type AgentCatalogSource } from "../src/agents/catalog.js";
@@ -1780,6 +1780,129 @@ Review the request.
     expect(enqueued).toEqual([]);
     await expect(dispatcher.dispatch(input)).resolves.toEqual({ claimed: false });
   });
+  it("keeps a promoted provider reservation when cancellation waits for the story lock", async () => {
+    const input = await budgetHandoffStory();
+    const costs = new CostBudgetService(db);
+    let releaseStory!: () => void;
+    let signalLocked!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseStory = resolve;
+    });
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    const lock = db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`facility:story:${input.orgId}:${input.projectId}:${input.storyId}`}))`,
+      );
+      signalLocked();
+      await gate;
+    });
+    await locked;
+    const canceled = storiesService.cancelTurn({ ...input, actor: { type: "user", id: "test" } });
+    let waiting = false;
+    for (let i = 0; i < 100; i++) {
+      const result = await db.execute<{ blocked: boolean }>(
+        sql`select exists(select 1 from pg_locks where locktype = 'advisory' and not granted) as blocked`,
+      );
+      if (result[0]?.blocked) {
+        waiting = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(waiting).toBe(true);
+    engine.blockUntilCanceled = true;
+    engine.blockingStarted = false;
+    const running = dispatcher.dispatch(input);
+    const escaped = running.then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    );
+    let accounting: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await waitFor(() => engine.blockingStarted);
+      const [hold] = await db
+        .select()
+        .from(budgetReservations)
+        .where(eq(budgetReservations.turnId, input.turnId));
+      expect(hold).toBeDefined();
+      const cap = Math.ceil(hold.reservedCents);
+      await db
+        .update(projectBudgets)
+        .set({ monthlyLimitCents: cap })
+        .where(eq(projectBudgets.projectId, input.projectId));
+      const workspace = (await storiesService.get(input.orgId, input.projectId, input.storyId))
+        .workspace;
+      if (!workspace) throw Error("Missing retained workspace");
+      const dir = join(workspace.volumeRef, ".facility", "engine-usage");
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, `${input.turnId}.json`),
+        JSON.stringify({
+          version: 1,
+          turnId: input.turnId,
+          engine: "codex",
+          complete: true,
+          usage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reportedCostCents: cap + 1,
+          },
+        }),
+      );
+      const original = CostBudgetService.prototype.record;
+      accounting = vi
+        .spyOn(CostBudgetService.prototype, "record")
+        .mockImplementation(async function (this: CostBudgetService, bill) {
+          if (bill.turnId === input.turnId) throw Error("review accounting unavailable");
+          return original.call(this, bill);
+        });
+      releaseStory();
+      await lock;
+      await canceled;
+      expect((await db.select().from(turns).where(eq(turns.id, input.turnId)))[0]?.state).toBe(
+        "canceled",
+      );
+      expect(
+        await db
+          .select()
+          .from(budgetReservations)
+          .where(eq(budgetReservations.turnId, input.turnId)),
+      ).toHaveLength(1);
+      expect(await escaped).toMatchObject({
+        error: expect.objectContaining({ message: "review accounting unavailable" }),
+      });
+      accounting.mockRestore();
+      accounting = undefined;
+      await recoverInterruptedTurns(db, storiesService);
+      expect(await db.select().from(turnUsage).where(eq(turnUsage.turnId, input.turnId))).toEqual([
+        expect.objectContaining({ priced: true }),
+      ]);
+      expect(await costs.budgetState(input.orgId, input.projectId)).toMatchObject({
+        state: "exceeded",
+      });
+      await dispatcher.activateQueuedSuccessor(input);
+      const next = (
+        await storiesService.get(input.orgId, input.projectId, input.storyId)
+      ).turns.find((t) => t.state === "queued");
+      if (!next) throw Error("Missing queued successor");
+      engine.blockUntilCanceled = false;
+      const before = engine.requests.length;
+      await expect(dispatcher.dispatch({ ...input, turnId: next.id })).resolves.toMatchObject({
+        state: "failed",
+      });
+      expect(engine.requests).toHaveLength(before);
+    } finally {
+      releaseStory();
+      await lock;
+      accounting?.mockRestore();
+      engine.blockUntilCanceled = false;
+      await escaped;
+    }
+  }, 15000);
 });
 
 async function waitFor(predicate: () => boolean) {

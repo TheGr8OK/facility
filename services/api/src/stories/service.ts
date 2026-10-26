@@ -560,11 +560,13 @@ export class StoryWorkspaceService {
   }) {
     const result = await this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
-      const turn = await scopedTurn(tx, input.orgId, input.projectId, input.turnId);
+      await lockStory(tx, input.orgId, input.projectId, input.storyId);
+      // Admission updates this same row before reserving provider spending. Keep
+      // its queued/running classification stable through cancellation and release.
+      const turn = await scopedTurn(tx, input.orgId, input.projectId, input.turnId, true);
       if (turn.storyId !== input.storyId) {
         throw new StoryServiceError("turn_not_found", "turn not found", 404);
       }
-      await lockStory(tx, input.orgId, input.projectId, input.storyId);
       if (["succeeded", "failed", "canceled"].includes(turn.state)) {
         return { turn, changed: false };
       }
@@ -2451,14 +2453,19 @@ async function scopedStory(db: FacilityDb, orgId: string, projectId: string, sto
   return story;
 }
 
-async function scopedTurn(db: FacilityDb, orgId: string, projectId: string, turnId: string) {
-  const turn = (
-    await db
-      .select()
-      .from(turns)
-      .where(and(eq(turns.orgId, orgId), eq(turns.projectId, projectId), eq(turns.id, turnId)))
-      .limit(1)
-  )[0];
+async function scopedTurn(
+  db: FacilityDb,
+  orgId: string,
+  projectId: string,
+  turnId: string,
+  lock = false,
+) {
+  const query = db
+    .select()
+    .from(turns)
+    .where(and(eq(turns.orgId, orgId), eq(turns.projectId, projectId), eq(turns.id, turnId)))
+    .limit(1);
+  const [turn] = await (lock ? query.for("update") : query);
   if (!turn) throw new StoryServiceError("turn_not_found", "turn not found", 404);
   return turn;
 }
