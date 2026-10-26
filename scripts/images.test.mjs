@@ -388,7 +388,7 @@ test("image security refreshes invalidate cached distro layers and audit the cac
     assert.match(dockerfile, /test -n "\$DEBIAN_SECURITY_REFRESH"/);
   }
   assert.match(runnerDockerfile, /brace-expansion@5\.0\.12/);
-  assert.match(runnerDockerfile, /undici@6\.28\.1/);
+  assert.match(runnerDockerfile, /undici@6\.29\.1/);
   const seed = runnerDockerfile.indexOf(
     'corepack install --global --cache-only "$package_manager"',
   );
