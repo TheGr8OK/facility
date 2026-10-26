@@ -443,6 +443,20 @@ environment:
     });
     expect(related.setupChecksum).not.toBe(refreshed.setupChecksum);
     expect(await readFile(join(repository, ".setup-count"), "utf8")).toBe("3");
+    // An ordinary turn may need setup for new code, but must never reseed retained data.
+    const next = await environment.prepare({
+      orgId,
+      projectId,
+      workspace: locator,
+      manifest: { ...manifest, hash: "changed-setup-manifest" },
+      credentials,
+      branch: "facility/story-environment",
+      previousSetupChecksum: related.setupChecksum,
+      readinessTimeoutMs: 2000,
+    });
+    expect(next.setupChecksum).not.toBe(related.setupChecksum);
+    expect(await readFile(join(repository, ".setup-count"), "utf8")).toBe("4");
+
     expect(await readFile(join(repository, ".facility-test/seed"), "utf8")).toBe(
       "retained-user-data",
     );

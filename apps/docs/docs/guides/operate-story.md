@@ -152,8 +152,7 @@ that all required PRs merged.
 
 With project write access, choose **Edit PR set**, find PRs in the project's GitHub mirror and
 select one required primary. Mark which PRs are required and confirm **These are all the PRs
-required to deliver this story**. Saving records metadata and history; it does not start an agent,
-accept work or merge a PR. Changing links clears the editor's completeness confirmation.
+required to deliver this story**. Saving records metadata and history. With workspace execution permission, **Save PR set and update preview** also authorizes Git updates and app rebuild/restart for this scope revision, retaining data. Saving does not start an AI agent, accept work or merge a PR. Changing links clears the editor's completeness confirmation.
 
 An automatic page refresh preserves unsaved selections. If somebody changes the saved set, a
 save reports a conflict and retains your edits. **Reload saved set (discard edits)** explicitly
@@ -181,7 +180,7 @@ Facility reconstructs each candidate from the configured development branch (def
 unset) and the complete current required heads. Superseded or removed heads are excluded. Displaced
 local commits remain reachable under `refs/facility/retained/`; tracked local edits block publication
 until saved. Checkout refuses to overwrite ignored or untracked retained paths. Suspension and
-recovery preserve the volume and native sessions, and convergence does not rerun creation-only seed.
+recovery preserve the volume and native sessions. Recovery retires abandoned compute and binds each attempt to its immutable provider identity, so delayed commands or stops cannot target a replacement. The next builder attaches to the converged revision, preserving the displaced branch under the retained refs. Dependency setup may rerun for new code; creation-only seed runs only on initial preparation or explicit clean setup.
 
 
 ## Inspect and test the environment

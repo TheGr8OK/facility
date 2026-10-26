@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PreviewGenerationRepository } from "@facility/core";
-import { type FacilityDb, stories, storyPreviewConvergences, workspaces } from "@facility/db";
+import { type FacilityDb, stories, workspaces } from "@facility/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { GithubWorkspaceCredentialBroker } from "../github/workspace-credentials.js";
 import { appendWorkspaceEvent } from "../workspaces/events.js";
@@ -18,7 +18,11 @@ import type {
   PreviewConvergenceScope,
   StoryPreviewConvergenceService,
 } from "./preview-convergence.js";
-import { PreviewLeaseLostError, withPreviewLease } from "./preview-lease.js";
+import {
+  PreviewComputeStopError,
+  PreviewLeaseLostError,
+  withPreviewLease,
+} from "./preview-lease.js";
 
 const MAX_DIRTY_PATHS = 1_000;
 
@@ -100,10 +104,19 @@ export class StoryPreviewConvergenceExecutor {
         return { claimed: true as const, state: "suspended" as const };
       }
       locator = workspaceLocator(workspace);
-      // A reclaimed attempt must halt the abandoned compute before any new writer
-      // wakes it. The retained volume and native sessions survive suspension.
+      // Retire abandoned compute so no delayed stop or command from the old
+      // attempt can address the replacement through the reusable workspace name.
       if (claim.requiresComputeFence) {
-        await this.runtime.suspend(locator);
+        try {
+          const abandoned = await this.runtime.inspect(locator);
+          if (abandoned.computeRef)
+            await this.runtime.retireCompute({
+              ...locator,
+              expectedComputeRef: abandoned.computeRef,
+            });
+        } catch (cause) {
+          throw new PreviewComputeStopError("Abandoned preview compute was not retired", { cause });
+        }
         await this.convergence.acknowledgeStopped(scope, {
           generation: claim.generation,
           leaseToken: claim.leaseToken,
@@ -113,7 +126,11 @@ export class StoryPreviewConvergenceExecutor {
         await this.releaseWriter(scope);
         return { claimed: true as const, state: "recovered" as const };
       }
-      const activeLocator = locator;
+      const compute = await this.runtime.wake(locator);
+      const activeLocator = { ...locator, expectedComputeRef: compute.computeRef };
+      locator = activeLocator;
+      // A worker delayed before binding compute must not clean up a newer owner.
+      await this.ensureLease(scope, claim.generation, claim.leaseToken);
       const refreshed = await withPreviewLease(
         () =>
           this.convergence.renew(scope, {
@@ -143,28 +160,7 @@ export class StoryPreviewConvergenceExecutor {
             signal,
           });
         },
-        async () => {
-          // A replacement first halts abandoned compute. A late old worker must
-          // not suspend the replacement after it has already acquired the lease.
-          let owner: { leaseToken: string | null } | undefined;
-          try {
-            [owner] = await this.db
-              .select({ leaseToken: storyPreviewConvergences.leaseToken })
-              .from(storyPreviewConvergences)
-              .where(
-                and(
-                  eq(storyPreviewConvergences.orgId, scope.orgId),
-                  eq(storyPreviewConvergences.projectId, scope.projectId),
-                  eq(storyPreviewConvergences.storyId, scope.storyId),
-                ),
-              )
-              .limit(1);
-          } catch {
-            await this.runtime.suspend(activeLocator);
-            return;
-          }
-          if (owner?.leaseToken === claim.leaseToken) await this.runtime.suspend(activeLocator);
-        },
+        () => this.runtime.suspend(activeLocator),
       );
       await this.ensureLease(scope, claim.generation, claim.leaseToken);
       const settlement = await this.convergence.complete(
@@ -198,6 +194,10 @@ export class StoryPreviewConvergenceExecutor {
             : ("ready" as const),
       };
     } catch (error) {
+      // An unconfirmed provider fence retains the durable writer. Recovery may
+      // reclaim its expired lease, but must retire compute before releasing it.
+      if (error instanceof PreviewComputeStopError)
+        return { claimed: true as const, state: "failed" as const, code: error.code };
       if (
         error instanceof PreviewLeaseLostError ||
         (error instanceof PreviewConvergenceError && error.code === "preview_lease_lost")

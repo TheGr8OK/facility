@@ -62,3 +62,15 @@ it.each([
   await observed;
   expect(result).toHaveBeenCalledWith("preview_lease_lost");
 });
+
+it("reports an unconfirmed compute stop instead of releasing a lost writer", async () => {
+  await expect(
+    withPreviewLease(
+      async () => null,
+      async () => "unreachable",
+      async () => {
+        throw new Error("provider unavailable");
+      },
+    ),
+  ).rejects.toMatchObject({ code: "preview_compute_stop_unconfirmed" });
+});

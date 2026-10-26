@@ -400,7 +400,7 @@ describe("@facility/mcp 0.12", () => {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     });
     await client.close();
     await server.close();

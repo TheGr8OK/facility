@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { newId } from "@facility/core";
 import type { FacilityDb } from "@facility/db";
 import { githubInstallations, projectRepositories, storyArtifacts, workspaces } from "@facility/db";
@@ -291,7 +291,10 @@ export class ProjectEnvironmentService {
           primaryPath(preparedInput.credentials),
           "environment.setup",
         );
-        if (preparedInput.manifest.environment.seed) {
+        if (
+          preparedInput.manifest.environment.seed &&
+          (input.cleanSetup || !input.previousSetupChecksum)
+        ) {
           await this.run(
             preparedInput,
             preparedInput.manifest.environment.seed,
@@ -631,6 +634,62 @@ export class ProjectEnvironmentService {
       cwd,
       env: input.credentials.environment,
     });
+    // Convergence publishes a detached, exact candidate. Attach the next builder
+    // to that candidate rather than checking out the displaced story branch.
+    const symbolic = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
+      command: "git",
+      args: ["symbolic-ref", "-q", "HEAD"],
+      cwd,
+      env: input.credentials.environment,
+    });
+    if (symbolic.exitCode !== 0) {
+      const managed = await this.runtime.exec(input.workspace, {
+        signal: input.signal,
+        command: "git",
+        args: ["rev-parse", "--verify", "refs/facility/preview-managed^{commit}"],
+        cwd,
+        env: input.credentials.environment,
+      });
+      const head = await this.runtime.exec(input.workspace, {
+        signal: input.signal,
+        command: "git",
+        args: ["rev-parse", "HEAD"],
+        cwd,
+        env: input.credentials.environment,
+      });
+      if (managed.exitCode === 0 && head.stdout.trim() === managed.stdout.trim()) {
+        const previous = local.exitCode === 0 ? local.stdout.trim().split(/\s+/)[0] : undefined;
+        if (previous)
+          await this.runCommand(
+            input,
+            "git",
+            ["update-ref", `refs/facility/retained/${randomUUID()}`, previous],
+            cwd,
+            "retain displaced story branch",
+          );
+        await this.runCommand(
+          input,
+          "git",
+          [
+            "update-ref",
+            `refs/heads/${input.branch}`,
+            head.stdout.trim(),
+            previous ?? "0".repeat(40),
+          ],
+          cwd,
+          "attach converged story branch",
+        );
+        await this.runCommand(
+          input,
+          "git",
+          ["switch", "--no-overwrite-ignore", input.branch],
+          cwd,
+          "git branch",
+        );
+        return;
+      }
+    }
     await this.runCommand(
       input,
       "git",
