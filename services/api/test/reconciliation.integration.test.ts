@@ -33,6 +33,6 @@ it("serializes concurrent scan pages, wraps, and preserves progress on rollback"
     .select()
     .from(reconciliationCursors)
     .where(eq(reconciliationCursors.name, name));
-  expect(cursor.lastId).toBe("b");
+  expect(cursor?.lastId).toBe("b");
   expect((await reconciliationPage(db, name, select)).map((r) => r.id)).toEqual(["c", "d"]);
 });
