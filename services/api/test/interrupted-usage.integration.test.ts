@@ -240,6 +240,7 @@ describe("dead worker accounting", () => {
     "negative",
     "oversized",
     "unavailable",
+    "orphan",
   ])("keeps %s evidence unknown and fails closed", async (kind) => {
     const input = await seed();
     if (kind === "malformed") await journal(input, "{");
@@ -250,7 +251,26 @@ describe("dead worker accounting", () => {
       await journal(input, { ...evidence(input), usage: { ...counters, inputTokens: -1 } });
     if (kind === "oversized") await journal(input, "x".repeat(5000));
     if (kind === "unavailable") await runtime.suspend(input.workspace);
-    await service.recoverInterruptedTurn(input);
+    const exec = runtime.exec.bind(runtime);
+    const orphan =
+      kind === "orphan"
+        ? vi.spyOn(runtime, "exec").mockImplementation((workspace, command) =>
+            command.env?.FACILITY_INTERRUPTED_TURN_ID
+              ? Promise.resolve({
+                  exitCode: 0,
+                  stdout: "compute-fence-required",
+                  stderr: "",
+                  durationMs: 0,
+                })
+              : exec(workspace, command),
+          )
+        : undefined;
+    try {
+      await service.recoverInterruptedTurn(input);
+    } finally {
+      orphan?.mockRestore();
+    }
+    if (kind === "orphan") expect((await runtime.inspect(input.workspace)).state).toBe("sleeping");
     expect(await db.select().from(turnUsage).where(eq(turnUsage.turnId, input.turnId))).toEqual([
       expect.objectContaining({ costCents: null, priced: false }),
     ]);

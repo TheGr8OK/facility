@@ -257,14 +257,31 @@ export async function stopInterruptedEngineProcess(
   if (!/^turn_[A-Za-z0-9_-]+$/.test(turnId)) {
     throw new AgentEngineError("turn_id_invalid", "interrupted engine turn id is invalid");
   }
-  const result = await runtime.exec(workspace, {
-    resume: false,
-    command: "node",
-    args: ["-e", ENGINE_PROCESS_CLEANUP],
-    env: { FACILITY_INTERRUPTED_TURN_ID: turnId },
-    timeoutMs: 15_000,
-  });
-  return result.exitCode === 0 ? result.stdout.trim() || "absent" : "cleanup failed";
+  try {
+    const result = await runtime.exec(workspace, {
+      resume: false,
+      command: "node",
+      args: ["-e", ENGINE_PROCESS_CLEANUP],
+      env: { FACILITY_INTERRUPTED_TURN_ID: turnId },
+      timeoutMs: 15_000,
+    });
+    if (result.exitCode === 0 && result.stdout.trim() === "compute-fence-required") {
+      // Ambiguous orphan ownership is fenced by stopping this story's compute,
+      // never by signaling an unauthenticated/reused process group.
+      await runtime.suspend(workspace);
+      const current = await runtime.inspect(workspace);
+      return current.state === "sleeping" || current.state === "destroyed"
+        ? "stopped"
+        : "cleanup failed";
+    }
+    return result.exitCode === 0 ? result.stdout.trim() || "absent" : "cleanup failed";
+  } catch (error) {
+    // Provider-confirmed stopped compute has no live writer to signal. Never
+    // wake it to inspect markers or substitute a newer workspace's evidence.
+    const current = await runtime.inspect(workspace);
+    if (current.state === "sleeping" || current.state === "destroyed") return "stopped";
+    throw error;
+  }
 }
 
 type ParsedEngineEvents = {
