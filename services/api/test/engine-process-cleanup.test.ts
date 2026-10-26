@@ -90,10 +90,9 @@ describe("native writer stop confirmation", () => {
     true,
     false,
   ])("requires a provider compute fence when only an unauthenticated native group survives: leader present=%s", async (leaderPresent) => {
-    const result = await cleanup({
-      ...(leaderPresent ? { 101: { group: 101, turn: "turn_fixture" } } : {}),
-      102: { group: 101, resistsTerm: true },
-    });
+    const processes: Record<number, Process> = { 102: { group: 101, resistsTerm: true } };
+    if (leaderPresent) processes[101] = { group: 101, turn: "turn_fixture" };
+    const result = await cleanup(processes);
     expect(result.output).toBe("compute-fence-required");
     expect(result.exitCode).toBe(0);
     expect(result.markers.size).toBe(2);
