@@ -22,7 +22,7 @@ import {
   users,
   workspaces,
 } from "@facility/db";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, notInArray, sql } from "drizzle-orm";
 import { CostBudgetService, releaseOpenTurnReservation } from "../insights/costs.js";
 import { ACTIVITY_NOISE_TYPES, presentTurnEvent } from "../turns/activity.js";
 import { stopInterruptedEngineProcess } from "../turns/engines.js";
@@ -2496,7 +2496,6 @@ async function activePreviewWriter(
           eq(storyPreviewConvergences.projectId, scope.projectId),
           eq(storyPreviewConvergences.storyId, scope.storyId),
           eq(storyPreviewConvergences.state, "applying"),
-          gt(storyPreviewConvergences.leaseExpiresAt, new Date()),
         ),
       )
       .limit(1)

@@ -5,20 +5,24 @@ import {
   createDb,
   githubPullRequests,
   migrate,
+  orgMembers,
   projectRepositories,
   projects,
   reconciliationCursors,
+  roles,
   seed,
   stories,
   storyConversations,
   storyDeliveryPullRequests,
   storyDeliveryScopes,
   storyPreviewAttempts,
+  storyPreviewConvergences,
   storyPreviewGenerations,
   turns,
+  users,
   workspaces,
 } from "@facility/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GithubMirrorService } from "../src/github/mirror.js";
 import { StoryPreviewConvergenceService } from "../src/stories/preview-convergence.js";
@@ -102,7 +106,8 @@ describe("durable story preview convergence", () => {
       storyId,
       revision: 1,
       declaredComplete: true,
-      updatedBy: { type: "user", id: "user_local_admin" },
+      executionAuthorization: { revision: 1, actor: { type: "user", id: "user_local_admin" } },
+      updatedBy: { type: "user" as const, id: "user_local_admin" },
     });
     await db.insert(storyDeliveryPullRequests).values({
       orgId: "org_local",
@@ -272,6 +277,10 @@ describe("durable story preview convergence", () => {
     await preview.observe(scope, now);
     const claim = await preview.claim(scope, now);
     if (!claim.claimed) throw new Error("Expected preview writer claim");
+    await db
+      .update(storyPreviewConvergences)
+      .set({ leaseExpiresAt: sql`now() - interval '1 second'` })
+      .where(eq(storyPreviewConvergences.storyId, scope.storyId));
     const conversationId = newId("sess");
     await db.insert(storyConversations).values({ id: conversationId, ...scope });
     const dispatch = vi.fn(async () => undefined);
@@ -286,11 +295,17 @@ describe("durable story preview convergence", () => {
     });
     expect(queued).toMatchObject({ queued: true, turn: undefined });
     expect(dispatch).not.toHaveBeenCalled();
-    await preview.complete(scope, {
-      generation: claim.generation,
-      leaseToken: claim.leaseToken,
-      workspaceId: "ws_preview",
-    });
+    const reclaimed = await preview.claim(scope);
+    if (!reclaimed.claimed) throw Error("Expected recovery claim");
+    expect(reclaimed.requiresComputeFence).toBe(true);
+    expect(
+      await storiesService.activateNextMessage({
+        ...scope,
+        agent: builder,
+        actor: { type: "user", id: "user_local_admin" },
+      }),
+    ).toBeUndefined();
+    await preview.acknowledgeStopped(scope, reclaimed);
     const activated = await storiesService.activateNextMessage({
       ...scope,
       agent: builder,
@@ -538,7 +553,7 @@ describe("durable story preview convergence", () => {
         storyId,
         revision: 1,
         declaredComplete: false,
-        updatedBy: { type: "user", id: "user_local_admin" },
+        updatedBy: { type: "user" as const, id: "user_local_admin" },
       })),
     );
     await db
@@ -554,5 +569,61 @@ describe("durable story preview convergence", () => {
     expect(observe.mock.calls.some(([s]) => s.storyId === ids[1000])).toBe(false);
     await service.reconcileObserved();
     expect(observe.mock.calls.some(([s]) => s.storyId === ids[1000])).toBe(true);
+  });
+  it("requires execution delegation for the current scope and rechecks revoked authorizers", async () => {
+    const { scope } = await fixture();
+    await db
+      .update(storyDeliveryScopes)
+      .set({ executionAuthorization: null })
+      .where(eq(storyDeliveryScopes.storyId, scope.storyId));
+    const enqueue = vi.fn(async () => undefined);
+    const service = new StoryPreviewConvergenceService(db, enqueue);
+    await service.observe(scope);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(await service.claim(scope)).toMatchObject({ claimed: false, reason: "blocked" });
+    const roleId = newId("role"),
+      userId = newId("user");
+    await db
+      .insert(roles)
+      .values({ id: roleId, orgId: scope.orgId, name: roleId, permissions: ["projects:write"] });
+    await db
+      .insert(users)
+      .values({ id: userId, email: `${userId}@example.test`, status: "active" });
+    await db.insert(orgMembers).values({ id: newId("member"), orgId: scope.orgId, userId, roleId });
+    const actor = { type: "user" as const, id: userId };
+    await expect(service.authorize(scope, actor, 1)).rejects.toMatchObject({ statusCode: 403 });
+    await db
+      .update(roles)
+      .set({ permissions: ["workspaces:execute"] })
+      .where(eq(roles.id, roleId));
+    await service.authorize(scope, actor, 1);
+    await service.observe(scope);
+    expect(enqueue).toHaveBeenCalled();
+    const claim = await service.claim(scope);
+    if (!claim.claimed) throw Error("Expected authorized claim");
+    await db
+      .update(roles)
+      .set({ permissions: ["projects:write"] })
+      .where(eq(roles.id, roleId));
+    expect(await service.renew(scope, claim)).toBeNull();
+    expect(await service.complete(scope, claim)).toMatchObject({ settled: true, superseded: true });
+    expect((await service.read(scope))?.state).toBe("blocked");
+    await db
+      .update(roles)
+      .set({ permissions: ["workspaces:execute"] })
+      .where(eq(roles.id, roleId));
+    await db
+      .update(storyDeliveryScopes)
+      .set({ revision: 2 })
+      .where(eq(storyDeliveryScopes.storyId, scope.storyId));
+    enqueue.mockClear();
+    await service.observe(scope);
+    expect(enqueue).not.toHaveBeenCalled();
+    await expect(service.authorize(scope, actor, 1)).rejects.toMatchObject({
+      code: "preview_delivery_changed",
+    });
+    await service.authorize(scope, actor, 2);
+    await service.observe(scope);
+    expect(await service.claim(scope)).toMatchObject({ claimed: true });
   });
 });

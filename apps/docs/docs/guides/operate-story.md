@@ -170,6 +170,19 @@ semantics. The register preserves the existing source PR association and lifecyc
 merge can still mark the story done while the delivery panel shows other required PRs outstanding.
 Acceptance, integration and all required merges remain separate facts.
 
+Preview execution requires `workspaces:execute`. Saving a delivery with that permission delegates
+convergence for that scope revision; a metadata-only writer can register the set, then an executor
+must review it and use **Retry preview**. A changed set needs fresh execution authorization.
+Webhook head updates retain the authorization for the same set; workers recheck the authorizer's
+current role or key before executing and while refreshing.
+
+Facility reconstructs each candidate from the configured development branch (default branch when
+unset) and the complete current required heads. Superseded or removed heads are excluded. Displaced
+local commits remain reachable under `refs/facility/retained/`; tracked local edits block publication
+until saved. Checkout refuses to overwrite ignored or untracked retained paths. Suspension and
+recovery preserve the volume and native sessions, and convergence does not rerun creation-only seed.
+
+
 ## Inspect and test the environment
 
 The environment view reports workspace state, provider inspection, setup and wake timing, events,
