@@ -1780,6 +1780,63 @@ Review the request.
     expect(enqueued).toEqual([]);
     await expect(dispatcher.dispatch(input)).resolves.toEqual({ claimed: false });
   });
+  it("retains the writer while native stop is pending and rolls back a failed stop", async () => {
+    const input = await budgetHandoffStory();
+    const admitted = await (
+      dispatcher as unknown as { admit: (i: typeof input) => Promise<{ kind: string }> }
+    ).admit(input);
+    expect(admitted.kind).toBe("running");
+    const stale = new Date(Date.now() - 300000);
+    await db.update(turns).set({ updatedAt: stale }).where(eq(turns.id, input.turnId));
+    let entered!: () => void;
+    let finish!: () => void;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const cleanup = vi.spyOn(runtime, "exec").mockImplementation(async (_workspace, command) => {
+      if (command.env?.FACILITY_INTERRUPTED_TURN_ID === input.turnId) {
+        entered();
+        await gate;
+        return { exitCode: 1, stdout: "", stderr: "stop unconfirmed", durationMs: 1 };
+      }
+      throw Error("Unexpected recovery command");
+    });
+    const onRecovered = vi.fn(async () => undefined);
+    const recovering = recoverInterruptedTurns(db, storiesService, new Date(), 60000, onRecovered);
+    const failed = expect(recovering).resolves.toBe(0);
+    try {
+      await inside;
+      expect((await db.select().from(turns).where(eq(turns.id, input.turnId)))[0]?.state).toBe(
+        "running",
+      );
+      expect(onRecovered).not.toHaveBeenCalled();
+      finish();
+      await failed;
+      expect((await db.select().from(turns).where(eq(turns.id, input.turnId)))[0]?.state).toBe(
+        "running",
+      );
+      expect(
+        await db
+          .select()
+          .from(budgetReservations)
+          .where(eq(budgetReservations.turnId, input.turnId)),
+      ).toHaveLength(1);
+      expect(onRecovered).not.toHaveBeenCalled();
+    } finally {
+      finish();
+      cleanup.mockRestore();
+      await recovering.catch(() => undefined);
+      await db
+        .update(turns)
+        .set({ state: "canceled", updatedAt: new Date() })
+        .where(eq(turns.id, input.turnId));
+      await db.delete(budgetReservations).where(eq(budgetReservations.turnId, input.turnId));
+    }
+  });
+
   it("keeps a promoted provider reservation when cancellation waits for the story lock", async () => {
     const input = await budgetHandoffStory();
     const costs = new CostBudgetService(db);
@@ -1827,6 +1884,7 @@ Review the request.
         .from(budgetReservations)
         .where(eq(budgetReservations.turnId, input.turnId));
       expect(hold).toBeDefined();
+      if (!hold) throw Error("Expected admitted provider reservation");
       const cap = Math.ceil(hold.reservedCents);
       await db
         .update(projectBudgets)

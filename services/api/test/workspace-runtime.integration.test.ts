@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import Docker from "dockerode";
 import { describe, expect, it } from "vitest";
-import { stopInterruptedEngineProcess } from "../src/turns/engines.js";
+import { ENGINE_PROCESS_WRAPPER, stopInterruptedEngineProcess } from "../src/turns/engines.js";
 import { ENGINE_USAGE_PROCESS, readUsageJournal } from "../src/turns/usage-journal.js";
 import { DockerWorkspaceRuntime } from "../src/workspaces/docker.js";
 import {
@@ -187,6 +187,51 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
         args: ["!", "-f", `.facility/engine-processes/${interruptedTurnId}.pid`],
       });
       expect(processMarker.exitCode, processMarker.stderr).toBe(0);
+
+      const resistantTurnId = "turn_docker_resistant_native";
+      const native =
+        "const fs=require('node:fs');process.on('SIGTERM',()=>{});setInterval(()=>fs.appendFileSync('interrupted-native-activity','x'),50);";
+      const start = [
+        "const {spawn}=require('node:child_process');",
+        `const child=spawn('sh',['-c',${JSON.stringify(ENGINE_PROCESS_WRAPPER)},'facility-engine','node','-e',${JSON.stringify(ENGINE_USAGE_PROCESS)},'node','-e',${JSON.stringify(native)}],{env:process.env,stdio:'ignore'});`,
+        "child.unref();setTimeout(()=>process.exit(0),300);",
+      ].join("\n");
+      const launched = await runtime.exec(workspace, {
+        command: "node",
+        args: ["-e", start],
+        env: { FACILITY_TURN_ID: resistantTurnId, FACILITY_ENGINE: "codex" },
+      });
+      expect(launched.exitCode, launched.stderr).toBe(0);
+      await waitUntil(
+        async () =>
+          (
+            await runtime.exec(workspace, {
+              command: "test",
+              args: ["-s", "interrupted-native-activity"],
+            })
+          ).exitCode === 0,
+      );
+      await expect(stopInterruptedEngineProcess(runtime, workspace, resistantTurnId)).resolves.toBe(
+        "stopped",
+      );
+      const activitySize = async () =>
+        (
+          await runtime.exec(workspace, {
+            command: "node",
+            args: [
+              "-e",
+              "process.stdout.write(String(require('node:fs').readFileSync('interrupted-native-activity').length))",
+            ],
+          })
+        ).stdout;
+      const stoppedSize = await activitySize();
+      const successorWrite = await runtime.exec(workspace, {
+        command: "node",
+        args: ["-e", "require('node:fs').writeFileSync('successor-write','safe')"],
+      });
+      expect(successorWrite.exitCode, successorWrite.stderr).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(await activitySize()).toBe(stoppedSize);
 
       await runtime.replaceCompute(workspace);
       await expect(runtime.inspect(workspace)).resolves.toMatchObject({ state: "sleeping" });
