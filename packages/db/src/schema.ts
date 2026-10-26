@@ -28,6 +28,12 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
 
+export const reconciliationCursors = pgTable("reconciliation_cursors", {
+  name: text("name").primaryKey(),
+  lastId: text("last_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
@@ -540,6 +546,10 @@ export const storyDeliveryScopes = pgTable(
     orgId: text("org_id").notNull(),
     projectId: text("project_id").notNull(),
     revision: integer("revision").notNull(),
+    executionAuthorization: jsonb("execution_authorization").$type<{
+      revision: number;
+      actor: { type: "user" | "key"; id: string };
+    }>(),
     declaredComplete: boolean("declared_complete").notNull().default(false),
     updatedBy: jsonb("updated_by").$type<{ type: "user" | "service"; id: string }>().notNull(),
     ...timestamps,

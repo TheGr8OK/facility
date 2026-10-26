@@ -5,6 +5,7 @@ import {
   renderAgentManifest,
 } from "@facility/agents";
 import {
+  can,
   ReplaceStoryDeliveryBody,
   StoryDeliveryQuery,
   StoryDeliverySchema,
@@ -171,7 +172,10 @@ export async function registerStoryWorkspaceRoutes(app: FastifyInstance, config:
         body,
         principalActor(actor),
       );
-      await domain.previewConvergence.observe({ orgId: actor.orgId, projectId, storyId });
+      const scope = { orgId: actor.orgId, projectId, storyId };
+      if (can(actor.permissions, "workspaces:execute"))
+        await domain.previewConvergence.authorize(scope, actor, result.scope.revision);
+      await domain.previewConvergence.observe(scope);
       return result;
     },
   );
@@ -225,6 +229,9 @@ export async function registerStoryWorkspaceRoutes(app: FastifyInstance, config:
       const current = await domain.previewConvergence.read(scope);
       if (!current)
         throw new ApiError(404, "preview_convergence_not_found", "Preview is not configured");
+      const delivery = await readStoryDelivery(app.facilityDb, scope);
+      await domain.previewConvergence.authorize(scope, principal(request), delivery.scope.revision);
+      await domain.previewConvergence.observe(scope);
       await domain.previewConvergence.retry(scope);
       reply.header("cache-control", "private, no-store");
       return (await domain.previewConvergence.read(scope)) ?? current;

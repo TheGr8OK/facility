@@ -376,6 +376,12 @@ export class TurnDispatcher {
           secrets,
         ),
         actor: { type: "system", id: `${manifest.engine}:${result.nativeSessionId}` },
+        attention: outcome.attention
+          ? {
+              title: `${manifest.name} needs a reply`,
+              detail: redactString(outcome.attention, secrets),
+            }
+          : undefined,
         metadata: {
           content: "final_response",
           engine: manifest.engine,
@@ -383,17 +389,7 @@ export class TurnDispatcher {
           progressMessages: result.progress.length,
         },
       });
-      if (outcome.attention) {
-        await this.storiesService.flagAttention({
-          orgId: input.orgId,
-          projectId: input.projectId,
-          storyId: story.id,
-          turnId: turn.id,
-          kind: "agent_waiting",
-          title: `${manifest.name} needs a reply`,
-          detail: redactString(outcome.attention, secrets),
-        });
-      } else {
+      if (!outcome.attention) {
         const retriedAttentionId = turn.triggerKey?.match(
           /^attention-retry:(attn_[a-z0-9]+)$/,
         )?.[1];

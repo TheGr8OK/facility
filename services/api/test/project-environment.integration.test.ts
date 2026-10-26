@@ -418,6 +418,34 @@ environment:
     );
     expect(await readFile(join(repository, ".facility-test/stop"), "utf8")).toBe("stopped");
     expect(refreshed.setupChecksum).not.toBe(first.setupChecksum);
+    await writeFile(
+      join(workspace.volumeRef, "repos/acme/shared/dependency.txt"),
+      "updated dependency",
+    );
+    await runtime.exec(locator, {
+      command: "git",
+      args: ["add", "dependency.txt"],
+      cwd: "repos/acme/shared",
+    });
+    await runtime.exec(locator, {
+      command: "git",
+      args: ["commit", "-m", "test: update related dependency"],
+      cwd: "repos/acme/shared",
+    });
+    const related = await environment.refreshPrepared({
+      orgId,
+      projectId,
+      workspace: locator,
+      manifest,
+      credentials,
+      previousSetupChecksum: refreshed.setupChecksum,
+      readinessTimeoutMs: 2000,
+    });
+    expect(related.setupChecksum).not.toBe(refreshed.setupChecksum);
+    expect(await readFile(join(repository, ".setup-count"), "utf8")).toBe("3");
+    expect(await readFile(join(repository, ".facility-test/seed"), "utf8")).toBe(
+      "retained-user-data",
+    );
   });
 
   it("opens previews on the agent's changed workspace without checkout, setup, or reseeding", async () => {

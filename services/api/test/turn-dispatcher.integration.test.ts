@@ -651,6 +651,128 @@ Review the request.
     expect(repliedIndex).toBeGreaterThan(askedIndex);
   });
 
+  it("retains a predecessor question before a completed turn becomes available to a successor", async () => {
+    const freshReviewer = parseAgentManifest(
+      agentSource("race-reviewer"),
+      ".agents/race-reviewer.md",
+    );
+    let attentionEntered!: () => void;
+    let releaseAttention!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      attentionEntered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseAttention = resolve;
+    });
+    const originalComplete = storiesService.completeTurn.bind(storiesService);
+    let held = false;
+    const flag = vi.spyOn(storiesService, "completeTurn").mockImplementation(async (input) => {
+      const result = await originalComplete(input);
+      if (!held) {
+        held = true;
+        attentionEntered();
+        await gate;
+      }
+      return result;
+    });
+    engine.outputOverride =
+      "One decision is required.\n<facility-needs-attention>RACE_QUESTION: Keep existing JSON exports?</facility-needs-attention>";
+    const started = await storiesService.start({
+      orgId,
+      projectId,
+      provider: "github",
+      externalId: `race-${suffix}`,
+      title: "Question persistence race",
+      agent: builder,
+      message: "Plan the export change",
+      messageDedupeKey: `race-start-${suffix}`,
+      actor: { type: "user", id: "review_fixture" },
+      workspace: { image: "facility-runner:test", ports: [] },
+    });
+    if (!started.queued.turn) throw new Error("expected asking turn");
+    const asking = dispatcher.dispatch({ orgId, projectId, turnId: started.queued.turn.id });
+    let observedPrompt: string | undefined;
+    let observedSession: string | undefined;
+    try {
+      await entered;
+      engine.outputOverride = undefined;
+      const reply = await storiesService.queueMessage({
+        orgId,
+        projectId,
+        storyId: started.story.id,
+        body: "No, continue.",
+        dedupeKey: `race-reply-${suffix}`,
+        agent: freshReviewer,
+        actor: { type: "user", id: "review_fixture" },
+        trigger: { type: "manual" },
+      });
+      if (!reply.turn) throw new Error("expected successor turn after predecessor success");
+      expect(await dispatcher.dispatch({ orgId, projectId, turnId: reply.turn.id })).toMatchObject({
+        state: "succeeded",
+      });
+      observedPrompt = engine.requests.at(-1)?.prompt;
+      observedSession = engine.requests.at(-1)?.nativeSessionId;
+    } finally {
+      releaseAttention();
+      await asking;
+      flag.mockRestore();
+    }
+    const notices = await db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(eq(attentionItems.storyId, started.story.id), eq(attentionItems.kind, "agent_waiting")),
+      );
+    expect(observedPrompt).toContain("RACE_QUESTION");
+    expect(observedSession).toBeUndefined();
+    expect(notices.every((notice) => notice.status === "resolved")).toBe(true);
+  });
+
+  it("redacts retained blocking-question detail before cross-agent reconstruction", async () => {
+    const freshReviewer = parseAgentManifest(
+      agentSource("redaction-reviewer"),
+      ".agents/redaction-reviewer.md",
+    );
+    engine.outputOverride =
+      "One decision.\n<facility-needs-attention>QUESTION_REDACTION: May project-secret and secret-installation-token be used?</facility-needs-attention>";
+    const started = await storiesService.start({
+      orgId,
+      projectId,
+      provider: "github",
+      externalId: `question-redaction-${suffix}`,
+      title: "Question redaction",
+      agent: builder,
+      message: "Plan the change",
+      messageDedupeKey: `redaction-start-${suffix}`,
+      actor: { type: "user", id: "review_fixture" },
+      workspace: { image: "facility-runner:test", ports: [] },
+    });
+    if (!started.queued.turn) throw new Error("expected asking turn");
+    expect(
+      await dispatcher.dispatch({ orgId, projectId, turnId: started.queued.turn.id }),
+    ).toMatchObject({ state: "succeeded" });
+    engine.outputOverride = undefined;
+    const reply = await storiesService.queueMessage({
+      orgId,
+      projectId,
+      storyId: started.story.id,
+      body: "No, continue.",
+      dedupeKey: `redaction-reply-${suffix}`,
+      agent: freshReviewer,
+      actor: { type: "user", id: "review_fixture" },
+      trigger: { type: "manual" },
+    });
+    if (!reply.turn) throw new Error("expected reply turn");
+    expect(await dispatcher.dispatch({ orgId, projectId, turnId: reply.turn.id })).toMatchObject({
+      state: "succeeded",
+    });
+    const rebuilt = engine.requests.at(-1);
+    expect(rebuilt?.nativeSessionId).toBeUndefined();
+    expect(rebuilt?.prompt).toContain("QUESTION_REDACTION: May [REDACTED] and [REDACTED] be used?");
+    expect(rebuilt?.prompt).not.toContain("project-secret");
+    expect(rebuilt?.prompt).not.toContain("secret-installation-token");
+  });
+
   it("claims a turn once even when dispatch is repeated", async () => {
     const rows = await db
       .select()
