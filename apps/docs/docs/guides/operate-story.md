@@ -70,7 +70,9 @@ edit in that browser tab. They are scoped to the signed-in person, organization,
 another person's session or another story does not restore that draft. They are not synchronized
 between devices or tabs. Closing the tab clears its session storage. If browser storage is
 unavailable, the draft remains in memory while the page stays open. Only **send to agent** submits
-it to Facility. Successful sends and explicit discard clear the stored draft.
+it to Facility. Successful sends clear only the exact submitted draft; a late receipt cannot erase
+newer edits restored after navigation. Explicit discard clears the current draft. Reopening retains
+the recipient you selected; only another explicit Reply changes its target.
 
 If the selected agent is removed or disabled, the draft remains available and sending requires
 choosing an available agent. A failed send preserves the text and recipient. Retrying the same
