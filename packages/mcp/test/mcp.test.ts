@@ -312,6 +312,7 @@ describe("@facility/mcp 0.12", () => {
           query: undefined,
           body: {
             candidate_revision: "a".repeat(64),
+            event_id: null,
             state: "succeeded",
             summary: "Integrated",
             evidence_url: null,

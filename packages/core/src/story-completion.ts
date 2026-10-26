@@ -38,6 +38,7 @@ export const DeliveryIntegrationPolicySchema = z
 export const RecordDeliveryIntegrationBody = z
   .object({
     candidate_revision: z.string().regex(/^[a-f0-9]{64}$/),
+    event_id: z.string().uuid().nullable().default(null),
     state: z.enum(["succeeded", "failed"]),
     summary: z.string().trim().min(1).max(2_000),
     evidence_url: z.string().url().max(2_000).nullable().default(null),

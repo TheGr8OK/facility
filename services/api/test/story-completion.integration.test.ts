@@ -20,10 +20,12 @@ import {
   storyDeliveryScopes,
   workspaces,
 } from "@facility/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { GithubClientFactory, Octokit } from "../src/github/client.js";
+import { StoryCompletionService } from "../src/stories/completion.js";
+import { replaceStoryDelivery } from "../src/stories/delivery.js";
 import { createStoryDomain } from "../src/story-domain.js";
 import type { AppConfig } from "../src/types.js";
 import { FakeWorkspaceRuntime } from "../src/workspaces/fake.js";
@@ -116,6 +118,7 @@ describe("durable delivery integration, notices and source completion", () => {
       revokedAt,
     });
     credentials[name] = generated.secret;
+    return generated.id;
   }
 
   beforeAll(async () => {
@@ -364,6 +367,7 @@ describe("durable delivery integration, notices and source completion", () => {
         scope,
         {
           candidate_revision: revision,
+          event_id: (await domain.completion.read(scope)).integration.eventId,
           state: "succeeded",
           summary: "Cannot arrive before dispatch",
           evidence_url: null,
@@ -385,6 +389,7 @@ describe("durable delivery integration, notices and source completion", () => {
       scope,
       {
         candidate_revision: revision,
+        event_id: (await domain.completion.read(scope)).integration.eventId,
         state: "succeeded",
         summary: "Integration completed",
         evidence_url: "https://ci.example.test/runs/1",
@@ -398,6 +403,7 @@ describe("durable delivery integration, notices and source completion", () => {
         scope,
         {
           candidate_revision: revision,
+          event_id: (await domain.completion.read(scope)).integration.eventId,
           state: "failed",
           summary: "Conflicting replay",
           evidence_url: null,
@@ -451,6 +457,7 @@ describe("durable delivery integration, notices and source completion", () => {
       scope,
       {
         candidate_revision: revision,
+        event_id: (await domain.completion.read(scope)).integration.eventId,
         state: "succeeded",
         summary: "Second destination completed",
         evidence_url: null,
@@ -477,6 +484,7 @@ describe("durable delivery integration, notices and source completion", () => {
       scope,
       {
         candidate_revision: revision,
+        event_id: (await domain.completion.read(scope)).integration.eventId,
         state: "succeeded",
         summary: "Re-enabled policy ran again",
         evidence_url: null,
@@ -601,5 +609,416 @@ describe("durable delivery integration, notices and source completion", () => {
       { type: "user", id: "user_local_admin" },
     );
     expect(reopened.completion.state).toBe("pending");
+  });
+  async function reviewFixture() {
+    const projectId = newId("proj"),
+      storyId = newId("story"),
+      repositoryId = newId("repo"),
+      otherRepositoryId = newId("repo");
+    const freshScope = { orgId, projectId, storyId };
+    const name = `review-${randomUUID().slice(0, 8)}`;
+    await db.insert(projects).values({ id: projectId, orgId, name, slug: projectId });
+    await db.insert(projectRepositories).values([
+      {
+        id: repositoryId,
+        orgId,
+        projectId,
+        owner: "example",
+        name,
+        role: "primary",
+        defaultBranch: "main",
+        installationId,
+      },
+      {
+        id: otherRepositoryId,
+        orgId,
+        projectId,
+        owner: "example",
+        name: `${name}-two`,
+        role: "related",
+        defaultBranch: "main",
+        installationId,
+      },
+    ]);
+    const issueId = newId("ghi"),
+      pullId = newId("ghp");
+    await db.insert(githubIssues).values({
+      id: issueId,
+      orgId,
+      projectId,
+      repositoryId,
+      number: 99,
+      title: "Source",
+      state: "open",
+      htmlUrl: `https://github.com/example/${name}/issues/99`,
+      syncedAt: new Date(),
+    });
+    await db.insert(githubPullRequests).values({
+      id: pullId,
+      orgId,
+      projectId,
+      repositoryId,
+      number: 1,
+      title: "Delivery",
+      state: "merged",
+      headSha: "a".repeat(40),
+      headRef: "feature",
+      baseRef: "main",
+      htmlUrl: `https://github.com/example/${name}/pull/1`,
+      syncedAt: new Date(),
+    });
+    await db.insert(stories).values({
+      id: storyId,
+      orgId,
+      projectId,
+      repositoryId,
+      provider: "github",
+      externalId: "issue:99",
+      title: "Source",
+      createdBy: { type: "user", id: "user_local_admin" },
+    });
+    await db.insert(storyDeliveryScopes).values({
+      ...freshScope,
+      revision: 1,
+      declaredComplete: true,
+      updatedBy: { type: "user", id: "user_local_admin" },
+    });
+    await db
+      .insert(storyDeliveryPullRequests)
+      .values({ ...freshScope, repositoryId, pullNumber: 1, required: true, isPrimary: true });
+    const completion = await domain.completion.reconcile(freshScope);
+    if (!completion.candidate.revision) throw Error("Missing review candidate");
+    const revision = completion.candidate.revision;
+    const result = {
+      candidate_revision: revision,
+      event_id: null,
+      state: "succeeded" as const,
+      summary: "Integration complete",
+      evidence_url: null,
+      idempotency_key: randomUUID(),
+    };
+    const request = {
+      candidate_revision: revision,
+      confirm: true as const,
+      idempotency_key: randomUUID(),
+    };
+    const change = () =>
+      replaceStoryDelivery(
+        db,
+        freshScope,
+        {
+          expected_revision: 1,
+          declared_complete: false,
+          pull_requests: [
+            { repository: `example/${name}`, number: 1, required: true, primary: true },
+          ],
+          idempotency_key: randomUUID(),
+        },
+        { type: "user", id: "user_local_admin" },
+      );
+    return {
+      scope: freshScope,
+      name,
+      repositoryId,
+      otherRepositoryId,
+      issueId,
+      pullId,
+      revision,
+      result,
+      request,
+      change,
+    };
+  }
+
+  it("requires every privileged permission and preserves policy keys through generic settings", async () => {
+    const f = await reviewFixture();
+    const identities: Record<string, string> = {};
+    for (const [name, permissions] of Object.entries({
+      project: ["projects:write"],
+      github: ["github:write"],
+      repo: ["repos:write"],
+      completion: ["projects:write", "github:write"],
+      policy: ["projects:write", "repos:write"],
+    })) {
+      const roleId = newId("role");
+      await db.insert(roles).values({ id: roleId, orgId, name: roleId, permissions });
+      const identity = `${f.scope.storyId}-${name}`;
+      await key(identity, orgId, f.scope.projectId, roleId);
+      identities[name] = identity;
+    }
+    for (const name of ["project", "github"]) {
+      const requestKey = randomUUID();
+      const denied = await app.inject({
+        method: "POST",
+        url: `/v1/projects/${f.scope.projectId}/workspace-stories/${f.scope.storyId}/complete`,
+        headers: { ...headers(identities[name] ?? "missing"), "idempotency-key": requestKey },
+        payload: { ...f.request, idempotency_key: requestKey },
+      });
+      expect(denied.statusCode, denied.body).toBe(403);
+    }
+    for (const name of ["project", "repo"]) {
+      const denied = await app.inject({
+        method: "PATCH",
+        url: `/v1/projects/${f.scope.projectId}/delivery-integration`,
+        headers: headers(identities[name] ?? "missing"),
+        payload: { mode: "manual", repository: null },
+      });
+      expect(denied.statusCode, denied.body).toBe(403);
+    }
+    expect(
+      await db
+        .select()
+        .from(storyCompletionOperations)
+        .where(eq(storyCompletionOperations.storyId, f.scope.storyId)),
+    ).toEqual([]);
+    const configured = await app.inject({
+      method: "PATCH",
+      url: `/v1/projects/${f.scope.projectId}/delivery-integration`,
+      headers: headers(identities.policy ?? "missing"),
+      payload: { mode: "manual", repository: null },
+    });
+    expect(configured.statusCode, configured.body).toBe(200);
+    for (const field of ["deliveryIntegration", "deliveryNotices"]) {
+      const denied = await app.inject({
+        method: "PATCH",
+        url: `/v1/projects/${f.scope.projectId}`,
+        headers: headers(identities.project ?? "missing"),
+        payload: {
+          settings: {
+            [field]:
+              field === "deliveryIntegration"
+                ? { mode: "none", repository: null }
+                : { in_app: false },
+          },
+        },
+      });
+      expect(denied.statusCode, denied.body).toBe(400);
+    }
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/v1/projects/${f.scope.projectId}`,
+          headers: headers(identities.project ?? "missing"),
+          payload: { settings: { ordinary: "preference" } },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await domain.completion.read(f.scope)).integration.policy.mode).toBe("manual");
+  });
+
+  it("keeps manual results pending across recovery and refuses worker dispatch", async () => {
+    const f = await reviewFixture();
+    await domain.completion.setPolicy(f.scope, { mode: "manual", repository: null });
+    await db
+      .update(storyDeliveryIntegrations)
+      .set({ state: "failed", errorCode: "integration_policy_changed" })
+      .where(eq(storyDeliveryIntegrations.storyId, f.scope.storyId));
+    enqueued.length = 0;
+    await domain.completion.recover();
+    expect(
+      enqueued.filter(
+        (job) =>
+          job.queue === "stories.delivery-integration" && job.data.storyId === f.scope.storyId,
+      ),
+    ).toEqual([]);
+    expect(await domain.completion.dispatchIntegration(f.scope)).toEqual({ claimed: false });
+    expect((await domain.completion.read(f.scope)).integration).toMatchObject({
+      state: "pending",
+      errorCode: null,
+    });
+    expect(
+      (
+        await domain.completion.recordIntegration(f.scope, f.result, {
+          type: "user",
+          id: "user_local_admin",
+        })
+      ).integration.state,
+    ).toBe("succeeded");
+  });
+
+  it("rejects old dispatch events after a destination or policy changes", async () => {
+    const f = await reviewFixture();
+    await domain.completion.setPolicy(f.scope, {
+      mode: "repository_dispatch",
+      repository: `example/${f.name}`,
+    });
+    await domain.completion.dispatchIntegration(f.scope);
+    const first = (await domain.completion.read(f.scope)).integration.eventId;
+    await domain.completion.setPolicy(f.scope, {
+      mode: "repository_dispatch",
+      repository: `example/${f.name}-two`,
+    });
+    await domain.completion.dispatchIntegration(f.scope);
+    const second = (await domain.completion.read(f.scope)).integration.eventId;
+    expect(second).not.toBe(first);
+    await expect(
+      domain.completion.recordIntegration(
+        f.scope,
+        { ...f.result, event_id: first },
+        { type: "service", id: "old" },
+      ),
+    ).rejects.toMatchObject({ code: "integration_event_stale" });
+    await expect(
+      domain.completion.recordIntegration(
+        f.scope,
+        { ...f.result, event_id: null },
+        { type: "service", id: "missing" },
+      ),
+    ).rejects.toMatchObject({ code: "integration_event_stale" });
+    const current = await domain.completion.recordIntegration(
+      f.scope,
+      { ...f.result, event_id: second },
+      { type: "service", id: "current" },
+    );
+    expect(current.integration).toMatchObject({
+      state: "succeeded",
+      recordedBy: { id: "current" },
+    });
+    await domain.completion.setPolicy(f.scope, { mode: "none", repository: null });
+    await domain.completion.setPolicy(f.scope, {
+      mode: "repository_dispatch",
+      repository: `example/${f.name}-two`,
+    });
+    await domain.completion.dispatchIntegration(f.scope);
+    await expect(
+      domain.completion.recordIntegration(
+        f.scope,
+        { ...f.result, event_id: second },
+        { type: "service", id: "old" },
+      ),
+    ).rejects.toMatchObject({ code: "integration_event_stale" });
+  });
+
+  it("records only one concurrent terminal receipt and preserves its original provenance", async () => {
+    const f = await reviewFixture();
+    await domain.completion.setPolicy(f.scope, { mode: "manual", repository: null });
+    const results = await Promise.allSettled([
+      domain.completion.recordIntegration(f.scope, f.result, { type: "service", id: "success" }),
+      domain.completion.recordIntegration(
+        f.scope,
+        { ...f.result, state: "failed", summary: "Integration failed" },
+        { type: "service", id: "failure" },
+      ),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const denied = results.find((result) => result.status === "rejected");
+    expect(denied).toMatchObject({ reason: { code: "integration_result_already_recorded" } });
+    const receipt = (await domain.completion.read(f.scope)).integration;
+    const duplicate = await domain.completion.recordIntegration(
+      f.scope,
+      {
+        ...f.result,
+        state: receipt.state as "succeeded" | "failed",
+        summary: receipt.summary ?? "",
+      },
+      { type: "service", id: "retry" },
+    );
+    expect(duplicate.integration.recordedAt).toBe(receipt.recordedAt);
+    expect(duplicate.integration.recordedBy).toEqual(receipt.recordedBy);
+  });
+
+  it("rechecks the candidate after client acquisition before closing the source", async () => {
+    const f = await reviewFixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const request = vi.fn(async () => ({ data: { number: 99, state: "closed" } }));
+    const service = new StoryCompletionService(
+      db,
+      async () => {
+        entered();
+        await gate;
+        return { request, rest: {} } as unknown as Octokit;
+      },
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    const running = service.dispatchCompletion(f.scope);
+    await waiting;
+    await f.change();
+    release();
+    expect(await running).toMatchObject({ claimed: true, state: "failed" });
+    expect(request).not.toHaveBeenCalled();
+    expect(
+      (await db.select().from(githubIssues).where(eq(githubIssues.id, f.issueId)))[0]?.state,
+    ).toBe("open");
+  });
+
+  it("serializes a delivery change after the bounded source-close operation", async () => {
+    const f = await reviewFixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const request = vi.fn(async () => {
+      entered();
+      await gate;
+      return { data: { number: 99, state: "closed" } };
+    });
+    const service = new StoryCompletionService(
+      db,
+      async () => ({ request, rest: {} }) as unknown as Octokit,
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    const running = service.dispatchCompletion(f.scope);
+    await waiting;
+    let changed = false;
+    const mutation = f.change().then(() => {
+      changed = true;
+    });
+    try {
+      await vi.waitFor(async () => {
+        const result = await db.execute(
+          sql`select count(*)::int as count from pg_locks where locktype = 'advisory' and not granted`,
+        );
+        expect(Number(result[0]?.count)).toBeGreaterThan(0);
+      });
+      expect(changed).toBe(false);
+    } finally {
+      release();
+    }
+    await running;
+    await mutation;
+    expect(request).toHaveBeenCalledOnce();
+    expect(changed).toBe(true);
+  });
+  it("does not close a source after the requesting key is revoked", async () => {
+    const f = await reviewFixture();
+    const roleId = newId("role");
+    await db
+      .insert(roles)
+      .values({ id: roleId, orgId, name: roleId, permissions: ["projects:write", "github:write"] });
+    const keyId = await key(
+      `completion-revocation-${f.scope.storyId}`,
+      orgId,
+      f.scope.projectId,
+      roleId,
+    );
+    const request = vi.fn(async () => ({ data: { number: 99, state: "closed" } }));
+    const service = new StoryCompletionService(
+      db,
+      async () => ({ request, rest: {} }) as unknown as Octokit,
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "service", id: keyId });
+    await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.id, keyId));
+    expect(await service.dispatchCompletion(f.scope)).toMatchObject({
+      claimed: true,
+      state: "failed",
+      errorCode: "completion_authorization_revoked",
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 });

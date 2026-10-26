@@ -97,6 +97,7 @@ export function StoryCompletionPanel({
     setError(null);
     const result = await clientApi<StoryCompletion>("POST", `${story}/integration-result`, {
       candidate_revision: candidate,
+      event_id: current.integration.eventId,
       state,
       summary: summary.trim(),
       evidence_url: evidenceUrl.trim() || null,
@@ -253,7 +254,7 @@ export function StoryCompletionPanel({
         </div>
       ) : null}
 
-      {canConfigureNotices ? (
+      {canConfigure ? (
         <details className="mt-5 border-t border-(--line) pt-4 text-sm">
           <summary className="cursor-pointer text-(--mut)">Post-merge integration policy</summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] sm:items-end">
@@ -294,7 +295,7 @@ export function StoryCompletionPanel({
         </details>
       ) : null}
 
-      {canConfigure ? (
+      {canConfigureNotices ? (
         <details className="mt-4 border-t border-(--line) pt-4 text-sm">
           <summary className="cursor-pointer text-(--mut)">Delivery notice preference</summary>
           <div className="mt-3 flex flex-wrap items-center gap-3">

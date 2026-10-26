@@ -81,7 +81,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render(initial: StoryCompletion, permissions = true) {
+async function render(
+  initial: StoryCompletion,
+  permissions = true,
+  overrides: { canConfigure?: boolean; canConfigureNotices?: boolean } = {},
+) {
   await act(async () =>
     root.render(
       <StoryCompletionPanel
@@ -92,6 +96,7 @@ async function render(initial: StoryCompletion, permissions = true) {
         canConfigureNotices={permissions}
         canRecord={permissions}
         canComplete={permissions}
+        {...overrides}
       />,
     ),
   );
@@ -182,5 +187,13 @@ describe("story completion UI", () => {
     expect(container.textContent).toContain("sleeping · storage retained");
     expect(container.textContent).not.toContain("Complete source issue");
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("keeps integration policy and notice configuration permissions separate", async () => {
+    await render(snapshot(), false, { canConfigureNotices: true });
+    expect(container.textContent).toContain("Delivery notice preference");
+    expect(container.textContent).not.toContain("Post-merge integration policy");
+    await render(snapshot(), false, { canConfigure: true });
+    expect(container.textContent).toContain("Post-merge integration policy");
+    expect(container.textContent).not.toContain("Delivery notice preference");
   });
 });

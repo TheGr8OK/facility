@@ -5,8 +5,8 @@ import {
   renderAgentManifest,
 } from "@facility/agents";
 import {
-  RecordDeliveryIntegrationBody,
   can,
+  RecordDeliveryIntegrationBody,
   ReplaceStoryDeliveryBody,
   RequestStoryCompletionBody,
   StoryCompletionSchema,
@@ -19,6 +19,7 @@ import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { manifestFromProjection } from "../../agents/catalog.js";
+import { requirePermissions } from "../../auth/required-permissions.js";
 import { ApiError } from "../../errors.js";
 import { readStoryDelivery, replaceStoryDelivery } from "../../stories/delivery.js";
 import { IntegrationStateBody, updateIntegrationState } from "../../stories/integration-state.js";
@@ -321,6 +322,7 @@ export async function registerStoryWorkspaceRoutes(app: FastifyInstance, config:
           "Provide the same idempotency key in the header and body",
         );
       const actor = principal(request);
+      requirePermissions(actor, ["projects:write", "github:write"]);
       reply.header("cache-control", "private, no-store");
       return domain.completion.requestCompletion(
         { orgId: actor.orgId, projectId, storyId },

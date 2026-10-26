@@ -224,11 +224,12 @@ export const toolDefinitions: ToolDefinition[] = [
     name: "facility_record_delivery_integration",
     permission: "stories:write",
     description:
-      "Record a succeeded or failed post-merge integration result for the exact current candidate. A result cannot be carried to a different candidate and this action does not merge, deploy, close the source issue, or destroy storage. Needs stories:write.",
+      "Record a succeeded or failed post-merge integration result for the exact current candidate. Repository dispatch callbacks must provide the exact eventId from the dispatched payload. A result cannot be carried to a different candidate or event and this action does not merge, deploy, close the source issue, or destroy storage. Needs stories:write.",
     inputSchema: {
       projectId,
       storyId,
       candidateRevision: RecordDeliveryIntegrationBody.shape.candidate_revision,
+      eventId: RecordDeliveryIntegrationBody.shape.event_id,
       state: RecordDeliveryIntegrationBody.shape.state,
       summary: RecordDeliveryIntegrationBody.shape.summary,
       evidenceUrl: z.string().url().max(2_000).nullable().default(null),
@@ -240,6 +241,7 @@ export const toolDefinitions: ToolDefinition[] = [
     body: (args) =>
       RecordDeliveryIntegrationBody.parse({
         candidate_revision: args.candidateRevision,
+        event_id: args.eventId,
         state: args.state,
         summary: args.summary,
         evidence_url: args.evidenceUrl,

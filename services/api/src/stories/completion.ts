@@ -13,20 +13,24 @@ import {
   type FacilityDb,
   githubInstallations,
   githubIssues,
+  githubPullRequests,
   projectRepositories,
   projects,
   stories,
   storyCompletionOperations,
   storyDeliveryIntegrations,
   storyDeliveryPullRequests,
+  storyDeliveryScopes,
   storyMessages,
   turns,
   workspaces,
 } from "@facility/db";
 import { and, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { authorizePrincipal } from "../auth/workspace-execution.js";
 import { ApiError } from "../errors.js";
 import type { GithubClientFactory } from "../github/client.js";
 import { githubRateLimitRetryAt } from "../github/rate-limit.js";
+import { reconciliationPage } from "../reconciliation.js";
 import { readStoryDelivery } from "./delivery.js";
 import type { StoryWorkspaceService } from "./service.js";
 
@@ -41,7 +45,36 @@ export class StoryCompletionService {
     private readonly github: GithubClientFactory,
     private readonly storiesService: StoryWorkspaceService,
     private readonly enqueue: Enqueue,
+    private readonly mutationLocked = false,
   ) {}
+
+  private async mutate<T>(scope: Scope, action: (service: StoryCompletionService) => Promise<T>) {
+    const jobs: Array<{ queue: string; data: Record<string, unknown> }> = [];
+    const result = await this.db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as FacilityDb;
+      await tx.execute(sql`set local lock_timeout = '5s'`);
+      await tx.execute(sql`set local statement_timeout = '20s'`);
+      // Same order as delivery replacement and policy/repository mutations.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`${scope.orgId}:${scope.projectId}`}))`,
+      );
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`facility:story:${scope.orgId}:${scope.projectId}:${scope.storyId}`}))`,
+      );
+      const service = new StoryCompletionService(
+        tx,
+        this.github,
+        this.storiesService,
+        async (queue, data) => {
+          jobs.push({ queue, data });
+        },
+        true,
+      );
+      return action(service);
+    });
+    for (const job of jobs) await this.enqueue(job.queue, job.data);
+    return result;
+  }
 
   async read(scope: Scope, now = new Date()): Promise<StoryCompletion> {
     const delivery = await readStoryDelivery(this.db, scope, { now });
@@ -250,7 +283,8 @@ export class StoryCompletionService {
     return noticePolicyFromSettings(project.settings);
   }
 
-  async reconcile(scope: Scope, now = new Date()) {
+  async reconcile(scope: Scope, now = new Date()): Promise<StoryCompletion> {
+    if (!this.mutationLocked) return this.mutate(scope, (service) => service.reconcile(scope, now));
     const delivery = await readStoryDelivery(this.db, scope, { now });
     const policy = await this.policy(scope);
     if (
@@ -277,7 +311,9 @@ export class StoryCompletionService {
       !existing ||
       existing.candidateRevision !== candidateRevision ||
       existing.mode !== policy.mode ||
-      existing.repositoryId !== (repository?.id ?? null)
+      existing.repositoryId !== (repository?.id ?? null) ||
+      (existing.mode === "manual" &&
+        (existing.errorCode !== null || ["dispatching", "dispatched"].includes(existing.state)))
     ) {
       await this.db
         .insert(storyDeliveryIntegrations)
@@ -342,7 +378,13 @@ export class StoryCompletionService {
     for (const scope of linked) await this.reconcile(scope);
   }
 
-  async recordIntegration(scope: Scope, body: RecordDeliveryIntegration, actor: Actor) {
+  async recordIntegration(
+    scope: Scope,
+    body: RecordDeliveryIntegration,
+    actor: Actor,
+  ): Promise<StoryCompletion> {
+    if (!this.mutationLocked)
+      return this.mutate(scope, (service) => service.recordIntegration(scope, body, actor));
     const current = await this.reconcile(scope);
     assertCandidate(current, body.candidate_revision);
     if (current.integration.policy.mode === "none")
@@ -356,12 +398,23 @@ export class StoryCompletionService {
       .select()
       .from(storyDeliveryIntegrations)
       .where(integrationWhere(scope))
+      .for("update")
       .limit(1);
     if (!existing || existing.candidateRevision !== body.candidate_revision)
       throw new ApiError(
         409,
         "integration_candidate_stale",
         "Reload the current delivery candidate",
+      );
+    if (
+      (existing.mode === "repository_dispatch" &&
+        (!body.event_id || existing.eventId !== body.event_id)) ||
+      (existing.mode === "manual" && body.event_id !== null)
+    )
+      throw new ApiError(
+        409,
+        "integration_event_stale",
+        "The result must identify the current dispatched event",
       );
     if (
       current.integration.policy.mode === "repository_dispatch" &&
@@ -385,6 +438,8 @@ export class StoryCompletionService {
         "integration_result_already_recorded",
         "A terminal result is already recorded for this candidate",
       );
+    if (["succeeded", "failed"].includes(existing.state) && existing.errorCode === null)
+      return this.read(scope, now);
     await this.db
       .update(storyDeliveryIntegrations)
       .set({
@@ -409,7 +464,13 @@ export class StoryCompletionService {
     return projection;
   }
 
-  async requestCompletion(scope: Scope, body: RequestStoryCompletion, actor: Actor) {
+  async requestCompletion(
+    scope: Scope,
+    body: RequestStoryCompletion,
+    actor: Actor,
+  ): Promise<StoryCompletion> {
+    if (!this.mutationLocked)
+      return this.mutate(scope, (service) => service.requestCompletion(scope, body, actor));
     const current = await this.reconcile(scope);
     assertCandidate(current, body.candidate_revision);
     await this.assertCompletionGate(scope, current);
@@ -474,6 +535,7 @@ export class StoryCompletionService {
       .where(
         and(
           integrationWhere(scope),
+          eq(storyDeliveryIntegrations.mode, "repository_dispatch"),
           or(
             eq(storyDeliveryIntegrations.state, "pending"),
             and(
@@ -501,27 +563,46 @@ export class StoryCompletionService {
       const target = await this.repositoryById(scope, claimed.repositoryId);
       if (!target.installationId) throw new Error("github_destination_unavailable");
       const client = await this.github(target.installationId);
-      if (!client.request) throw new Error("github_requests_unavailable");
-      await client.request("POST /repos/{owner}/{repo}/dispatches", {
-        owner: target.owner,
-        repo: target.name,
-        event_type: "facility.delivery.merged",
-        client_payload: {
-          schemaVersion: 1,
-          orgId: scope.orgId,
-          projectId: scope.projectId,
-          storyId: scope.storyId,
-          candidateRevision: claimed.candidateRevision,
-          eventId: claimed.eventId,
-        },
-        request: { timeout: 15_000, retries: 0 },
+      const githubRequest = client.request;
+      if (!githubRequest) throw new Error("github_requests_unavailable");
+      await this.mutate(scope, async (service) => {
+        const fresh = await service.read(scope);
+        assertCandidate(fresh, claimed.candidateRevision);
+        if (
+          fresh.integration.policy.mode !== "repository_dispatch" ||
+          fresh.integration.eventId !== claimed.eventId ||
+          fresh.integration.repository !== `${target.owner}/${target.name}`
+        )
+          throw new Error("integration_policy_changed");
+        const [live] = await service.db
+          .select()
+          .from(storyDeliveryIntegrations)
+          .where(and(owned, eq(storyDeliveryIntegrations.eventId, claimed.eventId ?? "")))
+          .for("update")
+          .limit(1);
+        if (!live?.leaseUntil || live.leaseUntil <= new Date())
+          throw new Error("integration_lease_lost");
+        await githubRequest("POST /repos/{owner}/{repo}/dispatches", {
+          owner: target.owner,
+          repo: target.name,
+          event_type: "facility.delivery.merged",
+          client_payload: {
+            schemaVersion: 1,
+            orgId: scope.orgId,
+            projectId: scope.projectId,
+            storyId: scope.storyId,
+            candidateRevision: claimed.candidateRevision,
+            eventId: claimed.eventId,
+          },
+          request: { timeout: 10_000, retries: 0, signal: AbortSignal.timeout(10_000) },
+        });
+        const [saved] = await service.db
+          .update(storyDeliveryIntegrations)
+          .set({ state: "dispatched", leaseToken: null, leaseUntil: null, updatedAt: new Date() })
+          .where(owned)
+          .returning({ storyId: storyDeliveryIntegrations.storyId });
+        if (!saved) throw new Error("integration_lease_lost");
       });
-      const [saved] = await this.db
-        .update(storyDeliveryIntegrations)
-        .set({ state: "dispatched", leaseToken: null, leaseUntil: null, updatedAt: new Date() })
-        .where(owned)
-        .returning({ storyId: storyDeliveryIntegrations.storyId });
-      if (!saved) throw new Error("integration_lease_lost");
       await this.reconcileNotices(scope, await this.read(scope));
       return { claimed: true, state: "dispatched" as const };
     } catch (error) {
@@ -529,9 +610,11 @@ export class StoryCompletionService {
       const code =
         typeof status === "number"
           ? `github_http_${status}`
-          : error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
-            ? error.message
-            : "integration_dispatch_failed";
+          : error instanceof ApiError
+            ? error.code
+            : error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
+              ? error.message
+              : "integration_dispatch_failed";
       const delay = Math.min(3_600_000, 60_000 * 2 ** Math.min(claimed.attempt, 6));
       await this.db
         .update(storyDeliveryIntegrations)
@@ -577,46 +660,121 @@ export class StoryCompletionService {
     if (!claimed) return { claimed: false };
     const owned = and(completionWhere(scope), eq(storyCompletionOperations.leaseToken, token));
     try {
-      const current = await this.read(scope, now);
-      assertCandidate(current, claimed.candidateRevision);
-      await this.assertCompletionGate(scope, current);
-      const source = await this.sourceTarget(scope);
-      if (source.issue.state !== "closed") {
-        if (!source.repository.installationId) throw new Error("github_destination_unavailable");
-        const client = await this.github(source.repository.installationId);
-        if (!client.request) throw new Error("github_requests_unavailable");
-        const response = await client.request("PATCH /repos/{owner}/{repo}/issues/{issue_number}", {
-          owner: source.repository.owner,
-          repo: source.repository.name,
-          issue_number: source.issue.number,
-          state: "closed",
-          state_reason: "completed",
-          request: { timeout: 15_000, retries: 0 },
-        });
-        const result = response.data as Record<string, unknown>;
-        if (result.state !== "closed" || result.number !== source.issue.number)
-          throw new Error("github_completion_unverified");
-        const closedAt =
-          typeof result.closed_at === "string" && Number.isFinite(Date.parse(result.closed_at))
-            ? new Date(result.closed_at)
-            : new Date();
-        await this.db
-          .update(githubIssues)
-          .set({
-            state: "closed",
-            closedAt,
-            githubUpdatedAt: closedAt,
-            syncedAt: new Date(),
-            updatedAt: new Date(),
-          })
+      const initialSource = await this.sourceTarget(scope);
+      const githubRequest =
+        initialSource.issue.state === "closed"
+          ? undefined
+          : initialSource.repository.installationId
+            ? (await this.github(initialSource.repository.installationId)).request
+            : undefined;
+      if (initialSource.issue.state !== "closed" && !githubRequest)
+        throw new Error("github_destination_unavailable");
+      await this.mutate(scope, async (service) => {
+        const [operation] = await service.db
+          .select()
+          .from(storyCompletionOperations)
+          .where(owned)
+          .for("update")
+          .limit(1);
+        if (!operation?.leaseUntil || operation.leaseUntil <= new Date())
+          throw new Error("completion_lease_lost");
+        await authorizePrincipal(
+          service.db,
+          scope,
+          {
+            type: operation.requestedBy.type === "user" ? "user" : "key",
+            id: operation.requestedBy.id,
+          },
+          ["projects:write", "github:write"],
+          "completion_authorization_revoked",
+        );
+        // Freeze all local observations that can invalidate the authorized close.
+        await service.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(and(eq(projects.orgId, scope.orgId), eq(projects.id, scope.projectId)))
+          .for("share");
+        await service.db
+          .select({ id: stories.id })
+          .from(stories)
+          .where(storyWhere(scope))
+          .for("share");
+        await service.db
+          .select({ id: storyDeliveryScopes.storyId })
+          .from(storyDeliveryScopes)
           .where(
             and(
-              eq(githubIssues.orgId, scope.orgId),
-              eq(githubIssues.projectId, scope.projectId),
-              eq(githubIssues.id, source.issue.id),
+              eq(storyDeliveryScopes.orgId, scope.orgId),
+              eq(storyDeliveryScopes.projectId, scope.projectId),
+              eq(storyDeliveryScopes.storyId, scope.storyId),
             ),
+          )
+          .for("share");
+        await service.db
+          .select({ id: githubPullRequests.id })
+          .from(githubPullRequests)
+          .innerJoin(
+            storyDeliveryPullRequests,
+            and(
+              eq(storyDeliveryPullRequests.repositoryId, githubPullRequests.repositoryId),
+              eq(storyDeliveryPullRequests.pullNumber, githubPullRequests.number),
+            ),
+          )
+          .where(
+            and(
+              eq(storyDeliveryPullRequests.orgId, scope.orgId),
+              eq(storyDeliveryPullRequests.projectId, scope.projectId),
+              eq(storyDeliveryPullRequests.storyId, scope.storyId),
+            ),
+          )
+          .for("share", { of: githubPullRequests });
+        const current = await service.read(scope);
+        assertCandidate(current, claimed.candidateRevision);
+        await service.assertCompletionGate(scope, current);
+        const source = await service.sourceTarget(scope);
+        if (
+          source.issue.id !== initialSource.issue.id ||
+          source.repository.installationId !== initialSource.repository.installationId
+        )
+          throw new Error("source_issue_changed");
+        if (source.issue.state !== "closed") {
+          if (!githubRequest) throw new Error("github_requests_unavailable");
+          const response = await githubRequest(
+            "PATCH /repos/{owner}/{repo}/issues/{issue_number}",
+            {
+              owner: source.repository.owner,
+              repo: source.repository.name,
+              issue_number: source.issue.number,
+              state: "closed",
+              state_reason: "completed",
+              request: { timeout: 10_000, retries: 0, signal: AbortSignal.timeout(10_000) },
+            },
           );
-      }
+          const result = response.data as Record<string, unknown>;
+          if (result.state !== "closed" || result.number !== source.issue.number)
+            throw new Error("github_completion_unverified");
+          const closedAt =
+            typeof result.closed_at === "string" && Number.isFinite(Date.parse(result.closed_at))
+              ? new Date(result.closed_at)
+              : new Date();
+          await service.db
+            .update(githubIssues)
+            .set({
+              state: "closed",
+              closedAt,
+              githubUpdatedAt: closedAt,
+              syncedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(githubIssues.orgId, scope.orgId),
+                eq(githubIssues.projectId, scope.projectId),
+                eq(githubIssues.id, source.issue.id),
+              ),
+            );
+        }
+      });
       await this.storiesService.reconcileIssue(scope.orgId, scope.projectId, scope.storyId);
       const finished = await this.read(scope);
       if (finished.source.state !== "closed" || !finished.retention.computeSuspended)
@@ -642,9 +800,11 @@ export class StoryCompletionService {
       const code =
         typeof status === "number"
           ? `github_http_${status}`
-          : error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
-            ? error.message
-            : "completion_failed";
+          : error instanceof ApiError
+            ? error.code
+            : error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
+              ? error.message
+              : "completion_failed";
       const delay = Math.min(3_600_000, 60_000 * 2 ** Math.min(claimed.attempt, 6));
       await this.db
         .update(storyCompletionOperations)
@@ -677,6 +837,7 @@ export class StoryCompletionService {
         })
         .where(
           and(
+            eq(storyDeliveryIntegrations.mode, "repository_dispatch"),
             eq(storyDeliveryIntegrations.state, "dispatching"),
             lte(storyDeliveryIntegrations.leaseUntil, now),
           ),
@@ -708,6 +869,7 @@ export class StoryCompletionService {
         .from(storyDeliveryIntegrations)
         .where(
           and(
+            eq(storyDeliveryIntegrations.mode, "repository_dispatch"),
             or(
               eq(storyDeliveryIntegrations.state, "pending"),
               and(
@@ -732,6 +894,25 @@ export class StoryCompletionService {
           ),
         ),
     ]);
+    const manual = await reconciliationPage(this.db, "manual-integration-notices", (tx, after) =>
+      tx
+        .select({
+          id: storyDeliveryIntegrations.storyId,
+          orgId: storyDeliveryIntegrations.orgId,
+          projectId: storyDeliveryIntegrations.projectId,
+          storyId: storyDeliveryIntegrations.storyId,
+        })
+        .from(storyDeliveryIntegrations)
+        .where(
+          and(
+            eq(storyDeliveryIntegrations.mode, "manual"),
+            after ? sql`${storyDeliveryIntegrations.storyId} > ${after}` : undefined,
+          ),
+        )
+        .orderBy(storyDeliveryIntegrations.storyId)
+        .limit(1000),
+    );
+    for (const { id: _id, ...scope } of manual) await this.reconcile(scope, now);
     for (const scope of integrations) {
       await this.reconcileNotices(scope, await this.read(scope), now);
       await this.enqueue("stories.delivery-integration", scope);

@@ -183,6 +183,24 @@ until saved. Checkout refuses to overwrite ignored or untracked retained paths. 
 recovery preserve the volume and native sessions, and convergence does not rerun creation-only seed.
 
 
+## Complete the source issue
+
+The completion panel separates the merged delivery, the configured post-merge integration and
+the source issue. Manual integration remains a human-recorded result. Repository dispatch waits
+for a result from the exact dispatched event. Completion requires both `projects:write` and
+`github:write`; changing integration policy requires both `projects:write` and `repos:write`.
+Ordinary project preferences preserve these policies.
+
+Repository-dispatch callbacks must set `event_id` to the `eventId` received in the
+`facility.delivery.merged` payload (`eventId` in MCP). A destination change or policy re-enable
+creates a new event. Identical terminal retries preserve the original receipt; conflicting
+terminal results are rejected. Manual integration uses a null event ID.
+
+Before the bounded GitHub close request, Facility rechecks the current candidate, integration,
+source binding and requesting principal. Delivery/policy mutations and local mirror updates are
+fenced through that request. Closing an issue, suspending compute and retaining storage remain
+separate recorded results; this action does not merge PRs or delete persistent storage.
+
 ## Inspect and test the environment
 
 The environment view reports workspace state, provider inspection, setup and wake timing, events,
