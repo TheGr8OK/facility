@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readStoryDraft, storyDraftKey, writeStoryDraft } from "../lib/story-draft";
+import {
+  clearSentStoryDraft,
+  readStoryDraft,
+  storyDraftKey,
+  writeStoryDraft,
+} from "../lib/story-draft";
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -8,6 +13,20 @@ beforeEach(() => {
 });
 
 describe("tab-local story drafts", () => {
+  it("clears a receipt only while the exact submitted draft still owns storage", () => {
+    const attempt = {
+      agent: "builder",
+      message: "Submitted",
+      idempotencyKey: `ui-message-${crypto.randomUUID()}`,
+    };
+    writeStoryDraft("draft", attempt);
+    expect(clearSentStoryDraft("draft", attempt)).toBe(true);
+    writeStoryDraft("draft", { ...attempt, message: "Newer edit" });
+    expect(clearSentStoryDraft("draft", attempt)).toBe(false);
+    expect(readStoryDraft("draft")?.message).toBe("Newer edit");
+    writeStoryDraft("draft", { agent: attempt.agent, message: attempt.message });
+    expect(clearSentStoryDraft("draft", attempt)).toBe(false);
+  });
   it("requires an identified person and separates every scope", () => {
     expect(storyDraftKey(undefined, "project", "story")).toBeNull();
     const keys = new Set([

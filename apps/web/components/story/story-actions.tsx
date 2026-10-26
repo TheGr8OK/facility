@@ -11,7 +11,13 @@ import {
 } from "@/components/story/workspace-story-controls";
 import type { StoryAgent, StoryWorkspace, WorkspaceStory, WorkspaceStoryBundle } from "@/lib/api";
 import { clientApi } from "@/lib/client-api";
-import { readStoryDraft, type StoryDraft, storyDraftKey, writeStoryDraft } from "@/lib/story-draft";
+import {
+  clearSentStoryDraft,
+  readStoryDraft,
+  type StoryDraft,
+  storyDraftKey,
+  writeStoryDraft,
+} from "@/lib/story-draft";
 import { safeExternalUrl } from "@/lib/story-presentation";
 
 type Turn = WorkspaceStoryBundle["turns"][number];
@@ -56,6 +62,7 @@ export function StoryActions({
   const [hasOpened, setHasOpened] = useState(open);
   const [preset, setPreset] = useState<string | undefined>(waitingAgent ?? undefined);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [retargetRequest, setRetargetRequest] = useState(0);
   const [notice, setNotice] = useState("");
   const actionBar = useRef<HTMLElement>(null);
   const panelId = useId();
@@ -66,6 +73,7 @@ export function StoryActions({
     const listener = (event: Event) => {
       const agent = (event as CustomEvent<{ agent?: string }>).detail?.agent;
       setPreset(agent);
+      setRetargetRequest((request) => request + 1);
       setOpen(true);
       setHasOpened(true);
       setFocusRequest((request) => request + 1);
@@ -166,6 +174,7 @@ export function StoryActions({
               preset={preset}
               open={open}
               focusRequest={focusRequest}
+              retargetRequest={retargetRequest}
               onDone={(message) => {
                 setNotice(message);
                 close();
@@ -192,6 +201,7 @@ export function StoryComposer({
   draftOwnerId,
   open = true,
   focusRequest = 0,
+  retargetRequest = 0,
 }: {
   projectId: string;
   storyId: string;
@@ -202,6 +212,7 @@ export function StoryComposer({
   draftOwnerId?: string;
   open?: boolean;
   focusRequest?: number;
+  retargetRequest?: number;
 }) {
   const router = useRouter();
   const defaultAgent =
@@ -218,9 +229,19 @@ export function StoryComposer({
   const [notice, setNotice] = useState("");
   const form = useRef<HTMLFormElement>(null);
   const sending = useRef(false);
-  const handledFocus = useRef(0);
+  const handledRetarget = useRef(0);
+  const handledFocus = useRef(-1);
+  const mounted = useRef(true);
+  const receiptCleared = useRef(false);
   const agent = agents.some((candidate) => candidate.name === draft.agent) ? draft.agent : "";
   const message = draft.message;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const previous = readStoryDraft(storageKey);
@@ -229,13 +250,19 @@ export function StoryComposer({
   }, [storageKey]);
 
   useEffect(() => {
-    if (loaded) setSaved(writeStoryDraft(storageKey, draft));
+    if (!loaded) return;
+    if (!draft.message && receiptCleared.current) {
+      receiptCleared.current = false;
+      return;
+    }
+    setSaved(writeStoryDraft(storageKey, draft));
   }, [draft, loaded, storageKey]);
 
   useEffect(() => {
-    if (!loaded || pending || !open) return;
-    if (focusRequest > handledFocus.current) {
-      handledFocus.current = focusRequest;
+    if (!loaded || pending || !open || handledFocus.current === focusRequest) return;
+    handledFocus.current = focusRequest;
+    if (retargetRequest > handledRetarget.current) {
+      handledRetarget.current = retargetRequest;
       if (preset !== undefined) {
         setDraft((current) =>
           current.agent === preset
@@ -247,7 +274,7 @@ export function StoryComposer({
     const input = form.current?.querySelector("textarea");
     input?.focus({ preventScroll: true });
     input?.scrollIntoView({ block: "center", behavior: "auto" });
-  }, [focusRequest, loaded, open, pending, preset]);
+  }, [focusRequest, retargetRequest, loaded, open, pending, preset]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -264,6 +291,8 @@ export function StoryComposer({
       storyPath(projectId, storyId, "/messages"),
       { agent, message, idempotency_key: key },
     );
+    if (result.ok) clearSentStoryDraft(storageKey, attempt);
+    if (!mounted.current) return;
     sending.current = false;
     setPending(false);
     if (!result.ok) {
@@ -274,8 +303,8 @@ export function StoryComposer({
       ? `Queued for ${agent}; it starts after the current run.`
       : `Sent to ${agent}.`;
     const empty = { agent, message: "" };
+    receiptCleared.current = true;
     setDraft(empty);
-    writeStoryDraft(storageKey, empty);
     setNotice(sent);
     router.refresh();
     onDone?.(sent);
