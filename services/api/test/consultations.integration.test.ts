@@ -403,10 +403,16 @@ describe("isolated consultation persistence and accounting", () => {
     ).toEqual([]);
   });
 
-  it("denies Haiku effort before creating a billable reservation or provider request", async () => {
+  it.each([
+    ["claude_code", "claude-haiku-4-5", "high"],
+    ["codex", "gpt-5.5", "minimal"],
+    ["codex", "gpt-5.5", "max"],
+    ["codex", "gpt-5.6-sol", "minimal"],
+  ])("denies unsupported %s/%s effort %s before reserving budget", async (engine, model, effort) => {
     const f = await env.fixture();
-    f.state.engine = "claude_code";
-    f.state.model = "claude-haiku-4-5";
+    f.state.engine = engine;
+    f.state.model = model;
+    f.state.reasoningEffort = effort;
     await expect(f.service.request(f.scope, await f.body(), f.actor, "ui")).rejects.toMatchObject({
       code: "reasoning_api_unsupported",
     });
