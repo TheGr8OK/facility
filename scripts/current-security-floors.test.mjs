@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import test from "node:test";
-import { assertPatchedVersion } from "../runner/verify-package-security.mjs";
+import { assertPatchedVersion, UNDICI_6_SECURITY_FLOOR } from "../runner/verify-package-security.mjs";
 
 const apiRequire = createRequire(new URL("../services/api/package.json", import.meta.url));
 const root = resolve(import.meta.dirname, "..");
@@ -11,7 +11,7 @@ const lock = apiRequire("yaml").parse(readFileSync(resolve(root, "pnpm-lock.yaml
 const floors = {
   zod: { 4: "4.6.6" },
   "body-parser": { 1: "1.20.9", 2: "2.4.0" },
-  undici: { 6: "6.28.1", 7: "7.30.1", 8: "8.12.2" },
+  undici: { 6: UNDICI_6_SECURITY_FLOOR, 7: "7.30.1", 8: "8.12.2" },
   "serialize-javascript": { 7: "7.1.3" },
   "fast-uri": { 3: "3.1.9", 4: "4.2.3" },
 };
