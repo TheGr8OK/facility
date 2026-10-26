@@ -11,6 +11,7 @@ import {
   projectRepositories,
   projects,
   stories,
+  storyDeliveryPullRequests,
   turnGitEvidence,
 } from "@facility/db";
 import { and, asc, desc, eq, isNull, notInArray, sql } from "drizzle-orm";
@@ -149,7 +150,11 @@ export class GithubMirrorService {
         if (saved) pullRequests += 1;
         const pullNumber = positiveInteger(pull.number);
         const headSha = string(object(pull.head).sha);
-        if (pullNumber && (await this.linkedStory(repository, { pullNumber, headSha }))) {
+        if (
+          pullNumber &&
+          ((await this.linkedStory(repository, { pullNumber, headSha })) ||
+            (await this.hasDeliveryLink(repository, pullNumber)))
+        ) {
           const reviewScan = await paginated(
             client,
             "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
@@ -795,6 +800,22 @@ export class GithubMirrorService {
       },
     });
     return 1;
+  }
+
+  private async hasDeliveryLink(repository: RepositoryRow, pullNumber: number) {
+    const [link] = await this.db
+      .select({ storyId: storyDeliveryPullRequests.storyId })
+      .from(storyDeliveryPullRequests)
+      .where(
+        and(
+          eq(storyDeliveryPullRequests.orgId, repository.orgId),
+          eq(storyDeliveryPullRequests.projectId, repository.projectId),
+          eq(storyDeliveryPullRequests.repositoryId, repository.id),
+          eq(storyDeliveryPullRequests.pullNumber, pullNumber),
+        ),
+      )
+      .limit(1);
+    return Boolean(link);
   }
 
   private async linkedStory(

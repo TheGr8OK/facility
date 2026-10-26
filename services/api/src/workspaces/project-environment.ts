@@ -210,6 +210,7 @@ type EnvironmentInput = {
   manifest: ProjectManifest;
   credentials: GithubWorkspaceCredentials;
   readinessTimeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 export class ProjectEnvironmentService {
@@ -248,6 +249,7 @@ export class ProjectEnvironmentService {
       );
       const cwd = repositoryPath(repository);
       const present = await this.runtime.exec(preparedInput.workspace, {
+        signal: preparedInput.signal,
         command: "git",
         args: ["-C", cwd, "rev-parse", "--git-dir"],
         env: preparedInput.credentials.environment,
@@ -367,6 +369,7 @@ export class ProjectEnvironmentService {
       );
       if (preparedInput.manifest.environment.ready) await this.waitUntilReady(preparedInput);
     }
+    preparedInput.signal?.throwIfAborted();
     const endpoints = await this.runtime.expose(
       preparedInput.workspace,
       services(preparedInput.manifest),
@@ -436,6 +439,7 @@ export class ProjectEnvironmentService {
     workspace: WorkspaceLocator;
     manifest: ProjectManifest;
     credentials: GithubWorkspaceCredentials;
+    signal?: AbortSignal;
   }) {
     const script = input.manifest.environment.browser_test;
     if (!script) {
@@ -454,6 +458,7 @@ export class ProjectEnvironmentService {
       "browser artifact directory",
     );
     const result = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command: "sh",
       args: ["-lc", script],
       cwd: primaryPath(preparedInput.credentials),
@@ -470,6 +475,7 @@ export class ProjectEnvironmentService {
     );
     if (result.exitCode !== 0) throw commandFailure("environment.browser_test", script, safeResult);
     const files = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command: "find",
       args: [artifactDirectory, "-type", "f", "-maxdepth", "2", "-print"],
       cwd: primaryPath(preparedInput.credentials),
@@ -569,21 +575,28 @@ export class ProjectEnvironmentService {
   }
 
   private async setupChecksum(input: EnvironmentInput) {
-    const head = await this.runtime.exec(input.workspace, {
-      command: "git",
-      args: ["rev-parse", "HEAD"],
-      cwd: primaryPath(input.credentials),
-      env: input.credentials.environment,
-    });
-    if (head.exitCode !== 0) {
-      throw commandFailure(
-        "environment.setup_checksum",
-        "git rev-parse HEAD",
-        redactResult(head, input.credentials.environment, input.manifest.environment.secrets),
-      );
+    const revisions: string[] = [];
+    for (const repository of [...input.credentials.repositories].sort((a, b) =>
+      `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`),
+    )) {
+      input.signal?.throwIfAborted();
+      const head = await this.runtime.exec(input.workspace, {
+        signal: input.signal,
+        command: "git",
+        args: ["rev-parse", "HEAD"],
+        cwd: `repos/${repository.owner}/${repository.name}`,
+        env: input.credentials.environment,
+      });
+      if (head.exitCode !== 0)
+        throw commandFailure(
+          "environment.setup_checksum",
+          "git rev-parse HEAD",
+          redactResult(head, input.credentials.environment, input.manifest.environment.secrets),
+        );
+      revisions.push(`${repository.owner}/${repository.name}:${head.stdout.trim()}`);
     }
     return createHash("sha256")
-      .update(`${input.manifest.hash}:${head.stdout.trim()}`)
+      .update(JSON.stringify({ manifest: input.manifest.hash, revisions }))
       .digest("hex");
   }
 
@@ -605,12 +618,14 @@ export class ProjectEnvironmentService {
       );
     }
     const local = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command: "git",
       args: ["show-ref", "--verify", `refs/heads/${input.branch}`],
       cwd,
       env: input.credentials.environment,
     });
     const remote = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command: "git",
       args: ["show-ref", "--verify", `refs/remotes/origin/${input.branch}`],
       cwd,
@@ -640,6 +655,7 @@ export class ProjectEnvironmentService {
     const deadline = Date.now() + (input.readinessTimeoutMs ?? 120_000);
     let last: WorkspaceCommandResult | undefined;
     while (Date.now() < deadline) {
+      input.signal?.throwIfAborted();
       last = await this.command(input, ready, primaryPath(input.credentials));
       if (last.exitCode === 0) return;
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -676,7 +692,9 @@ export class ProjectEnvironmentService {
   }
 
   private command(input: EnvironmentInput, script: string, cwd: string) {
+    input.signal?.throwIfAborted();
     return this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command: "sh",
       args: ["-lc", script],
       cwd,
@@ -693,6 +711,7 @@ export class ProjectEnvironmentService {
     phase: string,
   ) {
     const result = await this.runtime.exec(input.workspace, {
+      signal: input.signal,
       command,
       args,
       cwd,

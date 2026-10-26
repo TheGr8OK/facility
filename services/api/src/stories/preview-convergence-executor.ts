@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import type { PreviewGenerationRepository } from "@facility/core";
-import { type FacilityDb, stories, workspaces } from "@facility/db";
+import { type FacilityDb, stories, storyPreviewConvergences, workspaces } from "@facility/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { GithubWorkspaceCredentialBroker } from "../github/workspace-credentials.js";
 import { appendWorkspaceEvent } from "../workspaces/events.js";
@@ -17,6 +18,7 @@ import type {
   PreviewConvergenceScope,
   StoryPreviewConvergenceService,
 } from "./preview-convergence.js";
+import { PreviewLeaseLostError, withPreviewLease } from "./preview-lease.js";
 
 const MAX_DIRTY_PATHS = 1_000;
 
@@ -98,25 +100,72 @@ export class StoryPreviewConvergenceExecutor {
         return { claimed: true as const, state: "suspended" as const };
       }
       locator = workspaceLocator(workspace);
-      await this.ensureLease(scope, claim.generation, claim.leaseToken);
-      const [credentials, manifest] = await Promise.all([
-        this.credentials.issue(scope.orgId, scope.projectId),
-        this.manifests.load(scope.orgId, scope.projectId),
-      ]);
-      await new PreviewWorkspaceGitApplicator(this.runtime).apply({
-        workspace: locator,
-        repositories: claim.repositories,
-        credentials,
-        onProgress: () => this.ensureLease(scope, claim.generation, claim.leaseToken),
-      });
-      await this.ensureLease(scope, claim.generation, claim.leaseToken);
-      const refreshed = await this.environment.refreshPrepared({
-        ...scope,
-        workspace: locator,
-        manifest,
-        credentials,
-        previousSetupChecksum: workspace.setupChecksum,
-      });
+      // A reclaimed attempt must halt the abandoned compute before any new writer
+      // wakes it. The retained volume and native sessions survive suspension.
+      if (claim.requiresComputeFence) {
+        await this.runtime.suspend(locator);
+        await this.convergence.acknowledgeStopped(scope, {
+          generation: claim.generation,
+          leaseToken: claim.leaseToken,
+        });
+        await this.convergence.observe(scope);
+        await this.convergence.retry(scope);
+        await this.releaseWriter(scope);
+        return { claimed: true as const, state: "recovered" as const };
+      }
+      const activeLocator = locator;
+      const refreshed = await withPreviewLease(
+        () =>
+          this.convergence.renew(scope, {
+            generation: claim.generation,
+            leaseToken: claim.leaseToken,
+          }),
+        async (signal) => {
+          const [credentials, manifest] = await Promise.all([
+            this.credentials.issue(scope.orgId, scope.projectId),
+            this.manifests.load(scope.orgId, scope.projectId),
+          ]);
+          signal.throwIfAborted();
+          await new PreviewWorkspaceGitApplicator(this.runtime, signal).apply({
+            workspace: activeLocator,
+            repositories: claim.repositories,
+            credentials,
+            onProgress: async () => {
+              signal.throwIfAborted();
+            },
+          });
+          return this.environment.refreshPrepared({
+            ...scope,
+            workspace: activeLocator,
+            manifest,
+            credentials,
+            previousSetupChecksum: workspace.setupChecksum,
+            signal,
+          });
+        },
+        async () => {
+          // A replacement first halts abandoned compute. A late old worker must
+          // not suspend the replacement after it has already acquired the lease.
+          let owner: { leaseToken: string | null } | undefined;
+          try {
+            [owner] = await this.db
+              .select({ leaseToken: storyPreviewConvergences.leaseToken })
+              .from(storyPreviewConvergences)
+              .where(
+                and(
+                  eq(storyPreviewConvergences.orgId, scope.orgId),
+                  eq(storyPreviewConvergences.projectId, scope.projectId),
+                  eq(storyPreviewConvergences.storyId, scope.storyId),
+                ),
+              )
+              .limit(1);
+          } catch {
+            await this.runtime.suspend(activeLocator);
+            return;
+          }
+          if (owner?.leaseToken === claim.leaseToken) await this.runtime.suspend(activeLocator);
+        },
+      );
       await this.ensureLease(scope, claim.generation, claim.leaseToken);
       const settlement = await this.convergence.complete(
         scope,
@@ -149,7 +198,15 @@ export class StoryPreviewConvergenceExecutor {
             : ("ready" as const),
       };
     } catch (error) {
-      if (error instanceof PreviewConvergenceError && error.code === "preview_lease_lost") {
+      if (
+        error instanceof PreviewLeaseLostError ||
+        (error instanceof PreviewConvergenceError && error.code === "preview_lease_lost")
+      ) {
+        if (error instanceof PreviewLeaseLostError)
+          await this.convergence.acknowledgeStopped(scope, {
+            generation: claim.generation,
+            leaseToken: claim.leaseToken,
+          });
         if (locator && workspaceId) await this.honorSuspension(scope, locator, workspaceId);
         await this.releaseWriter(scope);
         return { claimed: true as const, state: "superseded" as const };
@@ -227,7 +284,10 @@ export class StoryPreviewConvergenceExecutor {
 }
 
 export class PreviewWorkspaceGitApplicator {
-  constructor(private readonly runtime: WorkspaceRuntime) {}
+  constructor(
+    private readonly runtime: WorkspaceRuntime,
+    private readonly signal?: AbortSignal,
+  ) {}
 
   async apply(input: {
     workspace: WorkspaceLocator;
@@ -254,7 +314,8 @@ export class PreviewWorkspaceGitApplicator {
       }
       grouped.set(key, [...(grouped.get(key) ?? []), target]);
     }
-    for (const [name, targets] of grouped) {
+    for (const name of configured.keys()) {
+      const targets = grouped.get(name) ?? [];
       await input.onProgress?.();
       const repository = configured.get(name);
       if (!repository) throw new Error("preview_repository_lookup_failed");
@@ -265,6 +326,7 @@ export class PreviewWorkspaceGitApplicator {
         [...targets].sort((left, right) => left.pullNumber - right.pullNumber),
         input.credentials.environment,
         input.onProgress,
+        repository.developmentBranch ?? repository.defaultBranch,
       );
     }
   }
@@ -275,6 +337,7 @@ export class PreviewWorkspaceGitApplicator {
     targets: PreviewGenerationRepository[],
     environment: Record<string, string>,
     onProgress?: () => Promise<unknown>,
+    baseBranch = "main",
   ) {
     await this.requireGit(workspace, cwd, environment, ["rev-parse", "--git-dir"], {
       code: "preview_repository_missing",
@@ -294,124 +357,173 @@ export class PreviewWorkspaceGitApplicator {
         false,
       );
     }
+    const managed = await this.git(workspace, cwd, environment, [
+      "rev-parse",
+      "--verify",
+      "refs/facility/preview-managed",
+    ]);
+    if (!targets.length && managed.exitCode !== 0) return;
     const dirty = await this.dirtySnapshot(workspace, cwd, environment);
+    const failure = {
+      code: "preview_candidate_build_failed",
+      message: "Facility could not reconstruct the complete preview candidate.",
+      retryable: true,
+    };
+    // Reconstruct from the configured integration base and the current complete set,
+    // never from accumulated HEAD. Object construction leaves the retained index alone.
+    await this.requireGit(
+      workspace,
+      cwd,
+      environment,
+      ["fetch", "--no-tags", "origin", `refs/heads/${baseBranch}`],
+      failure,
+    );
+    let candidate = (
+      await this.requireGit(
+        workspace,
+        cwd,
+        environment,
+        ["rev-parse", "FETCH_HEAD^{commit}"],
+        failure,
+      )
+    ).stdout.trim();
     for (const target of targets) {
       await onProgress?.();
-      const fetched = await this.git(workspace, cwd, environment, [
-        "fetch",
-        "--no-tags",
-        "origin",
-        target.headSha,
-      ]);
-      if (fetched.exitCode !== 0) {
-        throw new PreviewConvergenceError(
-          "preview_commit_unavailable",
-          "A required preview commit is not currently fetchable from its repository.",
-          true,
-          { repository: target.repository, pullNumber: target.pullNumber },
-        );
-      }
+      await this.requireGit(
+        workspace,
+        cwd,
+        environment,
+        ["fetch", "--no-tags", "origin", target.headSha],
+        {
+          code: "preview_commit_unavailable",
+          message: "A required preview commit is not fetchable.",
+          retryable: true,
+        },
+      );
       await this.requireGit(
         workspace,
         cwd,
         environment,
         ["cat-file", "-e", `${target.headSha}^{commit}`],
-        {
-          code: "preview_commit_invalid",
-          message: "A required preview revision is not a Git commit.",
-          retryable: false,
-          details: { repository: target.repository, pullNumber: target.pullNumber },
-        },
+        failure,
       );
-      if (await this.isAncestor(workspace, cwd, environment, target.headSha, "HEAD")) continue;
-      const mergeBase = await this.requireGit(
-        workspace,
-        cwd,
-        environment,
-        ["merge-base", "HEAD", target.headSha],
-        {
-          code: "preview_ancestry_failed",
-          message: "Facility could not determine the preview commit ancestry.",
-          retryable: true,
-        },
-      );
-      const changed = await this.requireGit(
-        workspace,
-        cwd,
-        environment,
-        [
-          "diff",
-          "--name-only",
-          "--no-renames",
-          "-z",
-          mergeBase.stdout.trim(),
-          target.headSha,
-          "--",
-        ],
-        {
-          code: "preview_diff_failed",
-          message: "Facility could not compare the retained branch with a required commit.",
-          retryable: true,
-        },
-      );
-      const overlap = paths(changed.stdout).filter((path) => dirty.has(path));
-      if (overlap.length > 0) {
+      if (await this.isAncestor(workspace, cwd, environment, target.headSha, candidate)) continue;
+      if (await this.isAncestor(workspace, cwd, environment, candidate, target.headSha)) {
+        candidate = target.headSha;
+        continue;
+      }
+      const tree = await this.git(workspace, cwd, environment, [
+        "merge-tree",
+        "--write-tree",
+        candidate,
+        target.headSha,
+      ]);
+      if (tree.exitCode !== 0)
         throw new PreviewConvergenceError(
-          "preview_dirty_overlap",
-          "Local workspace edits overlap files changed by the required preview generation.",
+          "preview_merge_conflict",
+          "The current required preview heads conflict.",
           false,
-          { paths: overlap.slice(0, 50) },
-        );
-      }
-      if (await this.isAncestor(workspace, cwd, environment, "HEAD", target.headSha)) {
-        await this.requireGit(workspace, cwd, environment, ["merge", "--ff-only", target.headSha], {
-          code: "preview_fast_forward_failed",
-          message: "Facility could not fast-forward the retained repository safely.",
-          retryable: true,
-        });
-      } else {
-        const preflight = await this.git(workspace, cwd, environment, [
-          "merge-tree",
-          "--write-tree",
-          "HEAD",
-          target.headSha,
-        ]);
-        if (preflight.exitCode !== 0) {
-          throw new PreviewConvergenceError(
-            "preview_merge_conflict",
-            "Required preview commits conflict with the retained workspace branch.",
-            false,
-            { repository: target.repository, pullNumber: target.pullNumber },
-          );
-        }
-        const merged = await this.git(workspace, cwd, environment, [
-          "merge",
-          "--no-edit",
-          "--no-ff",
-          target.headSha,
-        ]);
-        if (merged.exitCode !== 0) {
-          await this.git(workspace, cwd, environment, ["merge", "--abort"]);
-          throw new PreviewConvergenceError(
-            "preview_merge_failed",
-            "Facility could not combine the required preview commits safely.",
-            true,
-            { repository: target.repository, pullNumber: target.pullNumber },
-          );
-        }
-      }
-      await onProgress?.();
-    }
-    for (const target of targets) {
-      if (!(await this.isAncestor(workspace, cwd, environment, target.headSha, "HEAD"))) {
-        throw new PreviewConvergenceError(
-          "preview_generation_verification_failed",
-          "The retained repository does not contain every required preview commit.",
-          true,
           { repository: target.repository, pullNumber: target.pullNumber },
         );
-      }
+      candidate = (
+        await this.requireGit(
+          workspace,
+          cwd,
+          {
+            ...environment,
+            GIT_AUTHOR_NAME: "Facility Preview",
+            GIT_AUTHOR_EMAIL: "preview@facility.invalid",
+            GIT_COMMITTER_NAME: "Facility Preview",
+            GIT_COMMITTER_EMAIL: "preview@facility.invalid",
+            GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+            GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+          },
+          [
+            "commit-tree",
+            tree.stdout.trim().split("\n")[0] ?? "",
+            "-p",
+            candidate,
+            "-p",
+            target.headSha,
+            "-m",
+            "Facility complete preview candidate",
+          ],
+          failure,
+        )
+      ).stdout.trim();
     }
+    const current = (
+      await this.requireGit(workspace, cwd, environment, ["rev-parse", "HEAD"], failure)
+    ).stdout.trim();
+    const changed = await this.requireGit(
+      workspace,
+      cwd,
+      environment,
+      ["diff", "--name-only", "--no-renames", "-z", current, candidate, "--"],
+      failure,
+    );
+    const overlap = paths(changed.stdout).filter((path) => dirty.has(path));
+    if (overlap.length)
+      throw new PreviewConvergenceError(
+        "preview_dirty_overlap",
+        "Local workspace edits overlap the current preview candidate.",
+        false,
+        { paths: overlap.slice(0, 50) },
+      );
+    // A tracked local overlay cannot be labelled the exact candidate. Preserve it
+    // in place and ask the user to save it before retrying, including staged edits.
+    const tracked = await this.requireGit(
+      workspace,
+      cwd,
+      environment,
+      ["status", "--porcelain", "--untracked-files=no"],
+      dirtyReadFailure,
+    );
+    if (tracked.stdout.trim())
+      throw new PreviewConvergenceError(
+        "preview_dirty_worktree",
+        "Save tracked local edits before publishing an exact preview candidate.",
+        false,
+      );
+    if (current !== candidate) {
+      // Retain every displaced commit, even a detached local branch. No reset or clean.
+      await this.requireGit(
+        workspace,
+        cwd,
+        environment,
+        ["update-ref", `refs/facility/retained/${randomUUID()}`, current],
+        failure,
+      );
+      await onProgress?.();
+      await this.requireGit(
+        workspace,
+        cwd,
+        environment,
+        ["checkout", "--detach", "--no-overwrite-ignore", candidate],
+        {
+          code: "preview_checkout_blocked",
+          message: "The preview candidate would overwrite a retained local path.",
+          retryable: false,
+        },
+      );
+    }
+    await this.requireGit(
+      workspace,
+      cwd,
+      environment,
+      ["update-ref", "refs/facility/preview-managed", candidate],
+      failure,
+    );
+    if (
+      (
+        await this.requireGit(workspace, cwd, environment, ["rev-parse", "HEAD"], failure)
+      ).stdout.trim() !== candidate
+    )
+      throw new PreviewConvergenceError(
+        "preview_generation_verification_failed",
+        "The retained repository is not the exact reconstructed candidate.",
+        false,
+      );
     await this.assertDirtyPreserved(workspace, cwd, environment, dirty);
   }
 
@@ -542,7 +654,9 @@ export class PreviewWorkspaceGitApplicator {
     environment: Record<string, string>,
     args: string[],
   ): Promise<WorkspaceCommandResult> {
+    this.signal?.throwIfAborted();
     return this.runtime.exec(workspace, {
+      signal: this.signal,
       command: "git",
       args,
       cwd,

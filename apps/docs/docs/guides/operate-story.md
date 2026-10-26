@@ -70,7 +70,9 @@ edit in that browser tab. They are scoped to the signed-in person, organization,
 another person's session or another story does not restore that draft. They are not synchronized
 between devices or tabs. Closing the tab clears its session storage. If browser storage is
 unavailable, the draft remains in memory while the page stays open. Only **send to agent** submits
-it to Facility. Successful sends and explicit discard clear the stored draft.
+it to Facility. Successful sends clear only the exact submitted draft; a late receipt cannot erase
+newer edits restored after navigation. Explicit discard clears the current draft. Reopening retains
+the recipient you selected; only another explicit Reply changes its target.
 
 If the selected agent is removed or disabled, the draft remains available and sending requires
 choosing an available agent. A failed send preserves the text and recipient. Retrying the same
@@ -167,6 +169,19 @@ commit hashes. GitHub still controls required checks and branch protection.
 semantics. The register preserves the existing source PR association and lifecycle; a source PR
 merge can still mark the story done while the delivery panel shows other required PRs outstanding.
 Acceptance, integration and all required merges remain separate facts.
+
+Preview execution requires `workspaces:execute`. Saving a delivery with that permission delegates
+convergence for that scope revision; a metadata-only writer can register the set, then an executor
+must review it and use **Retry preview**. A changed set needs fresh execution authorization.
+Webhook head updates retain the authorization for the same set; workers recheck the authorizer's
+current role or key before executing and while refreshing.
+
+Facility reconstructs each candidate from the configured development branch (default branch when
+unset) and the complete current required heads. Superseded or removed heads are excluded. Displaced
+local commits remain reachable under `refs/facility/retained/`; tracked local edits block publication
+until saved. Checkout refuses to overwrite ignored or untracked retained paths. Suspension and
+recovery preserve the volume and native sessions, and convergence does not rerun creation-only seed.
+
 
 ## Inspect and test the environment
 

@@ -399,6 +399,26 @@ describe("consultation capability and source contract", () => {
     expect(sameConsultationModel("gpt-5.5-2026-09-29", "gpt-5.5-2026-10-21")).toBe(false);
   });
 
+  it("rejects unsupported model effort before dispatch without changing the request", async () => {
+    for (const model of ["claude-haiku-4-5", "claude-haiku-4-5-20251001"]) {
+      expect(consultationCapability("claude_code", model, "Review", "high")).toMatchObject({
+        eligible: false,
+        reason: "reasoning_api_unsupported",
+      });
+      expect(consultationCapability("claude_code", model, "Review")).toMatchObject({
+        eligible: true,
+      });
+      const fetchImpl = vi.fn<typeof fetch>();
+      await expect(
+        callConsultationProvider(
+          { ...input, provider: "anthropic", model, reasoningEffort: "high" },
+          fetchImpl,
+        ),
+      ).rejects.toMatchObject({ code: "reasoning_api_unsupported", certainty: "unbilled" });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
   it("rejects malformed, encoded, credential and traversing paths before reading sources", () => {
     expect(ConsultationPath.parse("src/worker.ts")).toBe("src/worker.ts");
     for (const path of [

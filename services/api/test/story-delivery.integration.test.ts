@@ -329,7 +329,8 @@ describe("project-scoped delivery register API", () => {
     expect(preview.statusCode, preview.body).toBe(200);
     const previewBody = preview.json();
     expect(previewBody).toMatchObject({
-      state: "pending",
+      state: "blocked",
+      error: { code: "preview_execution_authorization_required" },
       desired: {
         generation: result.candidate.revision,
       },
@@ -339,11 +340,10 @@ describe("project-scoped delivery register API", () => {
     expect(
       previewBody.desired.repositories.map((item: { repositoryId: string }) => item.repositoryId),
     ).toEqual(repositoryIds);
-    expect(enqueue).toHaveBeenCalledWith("stories.preview-convergence", {
-      orgId,
-      projectId,
-      storyId: legacyStory,
-    });
+    expect(enqueue).not.toHaveBeenCalledWith("stories.preview-convergence", {orgId, projectId, storyId:legacyStory});
+    expect(
+      await app.storyDomain.previewConvergence.claim({ orgId, projectId, storyId: legacyStory }),
+    ).toMatchObject({ claimed: false, reason: "blocked" });
     expect(
       (await app.inject({ url: previewPath(legacyStory), headers: headers("noRead") })).statusCode,
     ).toBe(403);

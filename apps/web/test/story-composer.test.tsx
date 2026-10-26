@@ -284,3 +284,48 @@ describe("story composer continuity", () => {
     );
   });
 });
+
+describe("draft ownership and explicit recipient intent", () => {
+  it("preserves an explicitly changed recipient when closing and reopening", async () => {
+    await render();
+    await reply("designer");
+    await type("Please implement this change");
+    await act(async () => {
+      recipient().value = "implementer";
+      recipient().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(recipient().value).toBe("implementer");
+    await click("close");
+    await click("send a task");
+    expect(message().value).toBe("Please implement this change");
+    expect(recipient().value).toBe("implementer");
+  });
+
+  it("does not clear a newer restored draft when an old in-flight send completes", async () => {
+    let finish!: (value: Response) => void;
+    fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await render();
+    await reply("implementer");
+    await type("First message, still sending");
+    await submit();
+    await render("person-a", "story-b");
+    await render();
+    await click("send a task");
+    expect(message().value).toBe("First message, still sending");
+    await type("New unsent message after navigation");
+    const storedKey = sessionStorage.key(0);
+    if (!storedKey) throw Error("Missing retained draft");
+    expect(sessionStorage.getItem(storedKey)).toContain("New unsent message");
+    await act(async () => finish(Response.json({ queued: { queued: false } })));
+    expect(message().value).toBe("New unsent message after navigation");
+    await render("person-a", "story-b");
+    await render();
+    await click("send a task");
+    expect(message().value).toBe("New unsent message after navigation");
+  });
+});
