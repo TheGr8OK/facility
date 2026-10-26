@@ -340,7 +340,11 @@ describe("project-scoped delivery register API", () => {
     expect(
       previewBody.desired.repositories.map((item: { repositoryId: string }) => item.repositoryId),
     ).toEqual(repositoryIds);
-    expect(enqueue).not.toHaveBeenCalledWith("stories.preview-convergence", {orgId, projectId, storyId:legacyStory});
+    expect(enqueue).not.toHaveBeenCalledWith("stories.preview-convergence", {
+      orgId,
+      projectId,
+      storyId: legacyStory,
+    });
     expect(
       await app.storyDomain.previewConvergence.claim({ orgId, projectId, storyId: legacyStory }),
     ).toMatchObject({ claimed: false, reason: "blocked" });
