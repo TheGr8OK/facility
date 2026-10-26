@@ -34,6 +34,37 @@ beforeAll(async () => {
 afterAll(async () => {
   await env?.client.end();
 });
+
+it("completes an admitted context with two verified 8 KiB source snapshots", async () => {
+  const f = await env.fixture();
+  f.state.sourceText = "a".repeat(8192);
+  const options = await f.service.options(f.scope, "ui", { costsVisible: true });
+  expect(options.agents[0]?.eligible).toBe(true);
+  const body = await f.body(true);
+  const first = body.sources[0];
+  if (!first) throw Error("Expected selected source");
+  f.octokit.rest.git.getCommit.mockImplementation(async (args) => ({
+    data: {
+      sha: String(args.commit_sha),
+      tree: { sha: "b".repeat(40) },
+    },
+  }));
+  body.sources.push({ ...first, commit_sha: "d".repeat(40) });
+  const queued = await f.service.request(f.scope, body, f.actor, "ui");
+  expect(queued.state).toBe("queued");
+  await f.service.dispatch({ ...f.scope, consultationId: queued.id });
+  const final = await f.service.get(f.scope, queued.id, { costsVisible: true });
+  expect(final).toMatchObject({ state: "succeeded", billing: { state: "confirmed" } });
+  expect(final.context.files).toHaveLength(2);
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+  expect(f.mutation).not.toHaveBeenCalled();
+  expect(
+    await env.db
+      .select()
+      .from(budgetReservations)
+      .where(eq(budgetReservations.storyId, f.scope.storyId)),
+  ).toEqual([]);
+});
 const job = (
   scope: { orgId: string; projectId: string; storyId: string },
   consultationId: string,
