@@ -503,7 +503,7 @@ describe("isolated consultation persistence and accounting", () => {
     try {
       await env.db
         .update(storyConsultations)
-        .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+        .set({ leaseExpiresAt: sql`now() - interval '1 second'` })
         .where(eq(storyConsultations.id, a.id));
       expect((await costs.budgetState(f.scope.orgId, f.scope.projectId)).state).toBe("unconfirmed");
       await expect(
@@ -554,7 +554,7 @@ describe("isolated consultation persistence and accounting", () => {
     try {
       await env.db
         .update(storyConsultations)
-        .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+        .set({ leaseExpiresAt: sql`now() - interval '1 second'` })
         .where(eq(storyConsultations.id, receipt.id));
       await f.service.recover();
       expect(await f.service.get(f.scope, receipt.id)).toMatchObject({
@@ -700,7 +700,7 @@ describe("isolated consultation persistence and accounting", () => {
     expect(f.fetch).toHaveBeenCalledTimes(1);
     await env.db
       .update(storyConsultations)
-      .set({ leaseExpiresAt: new Date(Date.now() - 1) })
+      .set({ leaseExpiresAt: sql`now() - interval '1 second'` })
       .where(eq(storyConsultations.id, a.id));
     await f.service.recover();
     expect(await f.service.get(f.scope, a.id)).toMatchObject({
