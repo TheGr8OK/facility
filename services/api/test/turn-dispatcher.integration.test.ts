@@ -698,6 +698,7 @@ Review the request.
         and(eq(attentionItems.storyId, started.story.id), eq(attentionItems.kind, "agent_waiting")),
       );
     expect(observedPrompt).toContain("RACE_QUESTION");
+    expect(observedSession).toBeUndefined();
     expect(notices.every((notice) => notice.status === "resolved")).toBe(true);
   });
 
