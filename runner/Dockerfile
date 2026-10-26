@@ -318,7 +318,7 @@ RUN npm install --global "npm@${NPM_VERSION}" \
     brace-expansion@5.0.12 \
     ip-address@10.7.4 \
     tar@7.5.21 \
-    undici@6.28.1 \
+    undici@6.29.1 \
   && rm -rf \
     /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
     /usr/local/lib/node_modules/npm/node_modules/ip-address \
@@ -368,6 +368,7 @@ COPY runner/verify-package-security.mjs /tmp/verify-package-security.mjs
 RUN package_manager="$(node -p "require('/tmp/facility-root-package.json').packageManager")" \
   && COREPACK_HOME=/opt/facility-corepack corepack install --global --cache-only "$package_manager" \
   && node /tmp/verify-package-security.mjs /usr/local/lib/node_modules/npm /opt/facility-corepack \
+    --overlay-cached-undici /usr/local/lib/node_modules/undici \
   && chmod -R a-w /opt/facility-corepack \
   && rm -f /tmp/facility-root-package.json /tmp/verify-package-security.mjs
 
