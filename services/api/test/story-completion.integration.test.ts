@@ -1097,4 +1097,73 @@ describe("durable delivery integration, notices and source completion", () => {
     expect(observed?.state).toBe(remoteState);
     expect(observed?.githubUpdatedAt?.toISOString()).toBe(reopenedAt);
   });
+  it("accepts its own matching close webhook before HTTP response", async () => {
+    const f = await reviewFixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const closedAt = new Date(Date.now() - 1000).toISOString();
+    const request = vi.fn(async () => {
+      entered();
+      await gate;
+      return { data: { number: 99, state: "closed", closed_at: closedAt, updated_at: closedAt } };
+    });
+    const service = new StoryCompletionService(
+      db,
+      async () => ({ request, rest: {} }) as unknown as Octokit,
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    const running = service.dispatchCompletion(f.scope);
+    await waiting;
+    // This is the ordinary event produced by the same successful PATCH, not a reopen.
+    const closingWebhook = domain.mirror.handleWebhook({
+      id: randomUUID(),
+      orgId,
+      projectId: f.scope.projectId,
+      repositoryId: f.repositoryId,
+      eventType: "issues",
+      payload: {
+        action: "closed",
+        repository: { full_name: `example/${f.name}` },
+        issue: {
+          number: 99,
+          title: "Source",
+          state: "closed",
+          state_reason: "completed",
+          html_url: `https://github.com/example/${f.name}/issues/99`,
+          updated_at: closedAt,
+          closed_at: closedAt,
+        },
+      },
+    });
+    try {
+      await vi.waitFor(async () => {
+        const [observed] = await db
+          .select()
+          .from(githubIssues)
+          .where(eq(githubIssues.id, f.issueId));
+        expect(observed?.state).toBe("closed");
+        expect(observed?.githubUpdatedAt?.toISOString()).toBe(closedAt);
+      });
+    } finally {
+      release();
+    }
+    const outcome = await running;
+    await closingWebhook;
+    const [operation] = await db
+      .select()
+      .from(storyCompletionOperations)
+      .where(eq(storyCompletionOperations.storyId, f.scope.storyId));
+    const [story] = await db.select().from(stories).where(eq(stories.id, f.scope.storyId));
+    expect(request).toHaveBeenCalledOnce();
+    expect(outcome).toMatchObject({ state: "completed" });
+    expect(operation).toMatchObject({ state: "completed", errorCode: null });
+    expect(story?.status).toBe("done");
+  }, 15000);
 });

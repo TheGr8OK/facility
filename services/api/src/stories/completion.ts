@@ -779,7 +779,17 @@ export class StoryCompletionService {
               ),
             )
             .returning({ id: githubIssues.id });
-          if (!saved) throw new Error("completion_source_changed");
+          if (!saved) {
+            // The PATCH's own webhook may have committed the same close first.
+            // Preserve that newer row; only conflicting/reopened state invalidates completion.
+            const observed = await service.sourceTarget(scope);
+            if (
+              observed.issue.state !== "closed" ||
+              !observed.issue.githubUpdatedAt ||
+              observed.issue.githubUpdatedAt < observation.updatedAt
+            )
+              throw new Error("completion_source_changed");
+          }
         }
       });
       await this.storiesService.reconcileIssue(scope.orgId, scope.projectId, scope.storyId);
