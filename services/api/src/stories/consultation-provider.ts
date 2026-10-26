@@ -1,7 +1,11 @@
 import { CONSULTATION_LIMITS, MODEL_PRICES_USD_PER_1M, normalizeModel } from "@facility/core";
 import { validModelUsage } from "../insights/model-calls.js";
 import type { AgentTurnUsage } from "../turns/engines.js";
-import { type ConsultationProvider, sameConsultationModel } from "./consultation-policy.js";
+import {
+  type ConsultationProvider,
+  consultationCapability,
+  sameConsultationModel,
+} from "./consultation-policy.js";
 
 export type ConsultationCompletion = {
   text: string;
@@ -43,6 +47,13 @@ export async function callConsultationProvider(
     throw new ConsultationProviderError("consultation_context_too_large", "unbilled");
   if (input.signal?.aborted)
     throw new ConsultationProviderError("consultation_canceled", "unbilled");
+  const capability = consultationCapability(
+    input.provider === "anthropic" ? "claude_code" : "codex",
+    input.model,
+    input.prompt,
+    input.reasoningEffort,
+  );
+  if (!capability.eligible) throw new ConsultationProviderError(capability.reason, "unbilled");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CONSULTATION_LIMITS.timeoutMs);
   const signal = AbortSignal.any([controller.signal, ...(input.signal ? [input.signal] : [])]);
