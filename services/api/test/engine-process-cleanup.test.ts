@@ -86,6 +86,21 @@ async function cleanup(initial: Record<number, Process>, native = true) {
 }
 
 describe("native writer stop confirmation", () => {
+  it.each([
+    true,
+    false,
+  ])("requires a provider compute fence when only an unauthenticated native group survives: leader present=%s", async (leaderPresent) => {
+    const result = await cleanup({
+      ...(leaderPresent ? { 101: { group: 101, turn: "turn_fixture" } } : {}),
+      102: { group: 101, resistsTerm: true },
+    });
+    expect(result.output).toBe("compute-fence-required");
+    expect(result.exitCode).toBe(0);
+    expect(result.markers.size).toBe(2);
+    expect(result.processes.get(102)?.state).toBe("S");
+    expect(result.signals).not.toContainEqual({ pid: 102, signal: "SIGKILL" });
+  });
+
   it("hard-stops the native process group and legacy supervisor without touching another turn", async () => {
     const result = await cleanup({
       100: { group: 5, turn: "turn_fixture" },
