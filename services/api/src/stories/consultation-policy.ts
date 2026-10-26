@@ -10,6 +10,24 @@ export function consultationCapability(
   prompt: string,
   effort?: string | null,
 ): ConsultationCapability {
+  const capability = consultationModelCapability(engine, model, effort);
+  if (!capability.eligible) return capability;
+  if (Buffer.byteLength(prompt) > CONSULTATION_LIMITS.agentPromptBytes)
+    return {
+      eligible: false,
+      reason: "agent_prompt_too_large",
+      provider: capability.provider,
+      estimateCents: null,
+    };
+  return capability;
+}
+
+/** Model/effort compatibility is independent of the prepared context's byte limit. */
+export function consultationModelCapability(
+  engine: string,
+  model: string,
+  effort?: string | null,
+): ConsultationCapability {
   const provider: ConsultationProvider | null =
     engine === "codex" ? "openai" : engine === "claude_code" ? "anthropic" : null;
   const priceKey = normalizeModel(model);
@@ -24,13 +42,6 @@ export function consultationCapability(
     return {
       eligible: false as const,
       reason: "model_api_unsupported",
-      provider,
-      estimateCents: null,
-    };
-  if (Buffer.byteLength(prompt) > CONSULTATION_LIMITS.agentPromptBytes)
-    return {
-      eligible: false as const,
-      reason: "agent_prompt_too_large",
       provider,
       estimateCents: null,
     };
