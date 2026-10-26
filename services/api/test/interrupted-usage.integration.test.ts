@@ -532,6 +532,7 @@ it("retains canceled running usage until the lost dispatcher bill is reconciled"
     .select()
     .from(budgetReservations)
     .where(eq(budgetReservations.turnId, input.turnId));
+  if (!hold) throw Error("Missing reservation");
   expect(hold.reservedCents).toBeGreaterThan(0);
   const cap = Math.ceil(hold.reservedCents);
   await db
@@ -558,6 +559,7 @@ it("retains canceled running usage until the lost dispatcher bill is reconciled"
     spentCents: cap + 1,
   });
   const [original] = await db.select().from(turns).where(eq(turns.id, input.turnId));
+  if (!original) throw Error("Missing original turn");
   const successorId = newId("turn");
   await db.insert(turns).values({
     ...original,
@@ -581,6 +583,7 @@ it("advances accounting recovery past a full page of unresolved old bills", asyn
   const blockers = await seed();
   await db.update(turns).set({ state: "failed" }).where(eq(turns.id, blockers.turnId));
   const [template] = await db.select().from(turns).where(eq(turns.id, blockers.turnId));
+  if (!template) throw Error("Missing template turn");
   const oldTurns = Array.from({ length: 1000 }, () => ({
     ...template,
     id: newId("turn"),
