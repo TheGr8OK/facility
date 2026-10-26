@@ -91,7 +91,7 @@ export function StoryCompletionPanel({
   }
 
   async function recordIntegration(state: "succeeded" | "failed") {
-    if (!candidate) return;
+    if (!candidate || !current) return;
     integrationKey.current ??= crypto.randomUUID();
     setPending(`integration:${state}`);
     setError(null);
