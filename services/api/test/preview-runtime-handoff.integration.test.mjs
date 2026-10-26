@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile as cb } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { parseAgentManifest } from "@facility/agents";
@@ -44,13 +45,10 @@ import {
 } from "../src/workspaces/project-environment.js";
 
 it("preserves the converged next turn, fences delayed stops, and advertises delivery execution", async () => {
-  const root = await mkdtemp("/private/tmp/pr498-secondpass-repros-");
+  const root = await mkdtemp(join(tmpdir(), "facility-preview-handoff-"));
   const url =
     process.env.DATABASE_URL ?? "postgres://facility:facility@127.0.0.1:5461/facility_test";
-  assert.ok(
-    url,
-    "Set FACILITY_REVIEW_DATABASE_URL to your own disposable local facility_test database",
-  );
+  assert.ok(url, "Set DATABASE_URL to your own disposable local facility_test database");
   assert.equal(new URL(url).hostname, "127.0.0.1");
   assert.equal(new URL(url).pathname, "/facility_test");
   const { db, client } = createDb(url);
