@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId } from "@facility/core";
 import {
+  budgetReservations,
   createDb,
   migrate,
   orgs,
@@ -515,4 +516,122 @@ describe("dead worker accounting", () => {
       costs.assertTurnAllowed(orgId, input.projectId, "gpt-5.5", now),
     ).rejects.toMatchObject({ code: "budget_exceeded" });
   });
+});
+
+it("retains canceled running usage until the lost dispatcher bill is reconciled", async () => {
+  const input = await seed();
+  await appendTurnEvent(db, {
+    ...input,
+    type: "turn.phase",
+    data: { phase: "agent" },
+  });
+  await db.transaction((tx) =>
+    costs.reserveTurn(tx as unknown as typeof db, { ...input, model: "gpt-5.5" }),
+  );
+  const [hold] = await db
+    .select()
+    .from(budgetReservations)
+    .where(eq(budgetReservations.turnId, input.turnId));
+  expect(hold.reservedCents).toBeGreaterThan(0);
+  const cap = Math.ceil(hold.reservedCents);
+  await db
+    .update(projectBudgets)
+    .set({ monthlyLimitCents: cap })
+    .where(eq(projectBudgets.projectId, input.projectId));
+  await journal(input, {
+    ...evidence(input),
+    usage: { ...counters, reportedCostCents: cap + 1 },
+  });
+  // A provider ran; the observer disappears after receiving the cancellation.
+  await service.cancelTurn({ ...input, actor: { type: "user", id: "test" } });
+  expect(
+    await db.select().from(budgetReservations).where(eq(budgetReservations.turnId, input.turnId)),
+  ).toHaveLength(1);
+  expect((await costs.budgetState(orgId, input.projectId)).state).toBe("unconfirmed");
+  expect(await db.select().from(turnUsage).where(eq(turnUsage.turnId, input.turnId))).toEqual([]);
+  await recoverInterruptedTurns(db, service, new Date(), 60_000);
+  expect(await db.select().from(turnUsage).where(eq(turnUsage.turnId, input.turnId))).toHaveLength(
+    1,
+  );
+  expect(await costs.budgetState(orgId, input.projectId)).toMatchObject({
+    state: "exceeded",
+    spentCents: cap + 1,
+  });
+  const [original] = await db.select().from(turns).where(eq(turns.id, input.turnId));
+  const successorId = newId("turn");
+  await db.insert(turns).values({
+    ...original,
+    id: successorId,
+    state: "queued",
+    startedAt: null,
+    endedAt: null,
+  });
+  await expect(
+    db.transaction((tx) =>
+      costs.reserveTurn(tx as unknown as typeof db, {
+        ...input,
+        turnId: successorId,
+        model: "gpt-5.5",
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "budget_exceeded" });
+});
+
+it("advances accounting recovery past a full page of unresolved old bills", async () => {
+  const blockers = await seed();
+  await db.update(turns).set({ state: "failed" }).where(eq(turns.id, blockers.turnId));
+  const [template] = await db.select().from(turns).where(eq(turns.id, blockers.turnId));
+  const oldTurns = Array.from({ length: 1000 }, () => ({
+    ...template,
+    id: newId("turn"),
+    state: "failed",
+    createdAt: new Date("2010-01-01"),
+  }));
+  await db.insert(turns).values(oldTurns);
+  await db.insert(turnUsage).values(
+    oldTurns.map((t) => ({
+      id: newId("evt"),
+      orgId,
+      projectId: t.projectId,
+      storyId: t.storyId,
+      turnId: t.id,
+      agentName: t.agentName,
+      engine: t.engine,
+      model: t.model,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costCents: null,
+      priced: false,
+      source: "unpriced",
+      durationMs: 0,
+      status: "failed",
+    })),
+  );
+  const input = await seed();
+  await db.update(turns).set({ state: "failed" }).where(eq(turns.id, input.turnId));
+  await costs.record({
+    ...input,
+    agentName: "builder",
+    model: "gpt-5.5",
+    durationMs: 0,
+    status: "failed",
+    complete: false,
+  });
+  await journal(input, evidence(input));
+  const reconcile = vi.fn(async (item: { turnId: string }) => {
+    if (item.turnId === input.turnId) return service.reconcileInterruptedUsage(input);
+    return false; // The oldest journals remain unavailable.
+  });
+  const fakeRecovery = {
+    reconcileInterruptedUsage: reconcile,
+    recoverInterruptedTurn: async () => false,
+  } as unknown as StoryWorkspaceService;
+  await recoverInterruptedTurns(db, fakeRecovery);
+  await recoverInterruptedTurns(db, fakeRecovery);
+  expect(reconcile.mock.calls.length).toBeLessThanOrEqual(2000);
+  expect(reconcile.mock.calls.some(([item]) => item.turnId === input.turnId)).toBe(true);
+  // The regular sweep must reconcile the final bill without a targeted rescue.
+  expect((await costs.budgetState(orgId, input.projectId)).state).toBe("ok");
 });
