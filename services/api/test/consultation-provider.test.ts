@@ -56,6 +56,20 @@ function anthropic(patch: Record<string, unknown> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe("bounded text-only consultation provider", () => {
+  it("keeps the manifest prompt limit separate from a supported prepared context", async () => {
+    const prompt = "source snapshot\n".repeat(1500);
+    expect(Buffer.byteLength(prompt)).toBeGreaterThan(CONSULTATION_LIMITS.agentPromptBytes);
+    expect(consultationCapability("codex", input.model, prompt, "high")).toMatchObject({
+      eligible: false,
+      reason: "agent_prompt_too_large",
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(openai()));
+    await expect(
+      callConsultationProvider({ ...input, prompt, reasoningEffort: "high" }, fetchImpl),
+    ).resolves.toMatchObject({ outcome: "completed" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).input).toContain(prompt);
+  });
   it("uses the configured model and effort at one fixed endpoint with no tools or session reuse", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(openai()));
     expect(
