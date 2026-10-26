@@ -453,6 +453,7 @@ export class StoryWorkspaceService {
     output: string;
     actor: StoryActor;
     metadata?: StoryMessageMetadata;
+    attention?: { title: string; detail: string };
   }) {
     return this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
@@ -487,10 +488,22 @@ export class StoryWorkspaceService {
           .where(and(eq(turns.orgId, input.orgId), eq(turns.id, turn.id)))
           .returning()
       )[0];
+      if (input.attention) {
+        await tx.insert(attentionItems).values({
+          id: newId("attn"),
+          orgId: input.orgId,
+          projectId: input.projectId,
+          storyId: turn.storyId,
+          turnId: turn.id,
+          kind: "agent_waiting",
+          title: input.attention.title,
+          detail: input.attention.detail,
+        });
+      }
       await tx
         .update(stories)
         .set({
-          status: lifecycleStatusAfterTurn(story.status, "working"),
+          status: lifecycleStatusAfterTurn(story.status, input.attention ? "attention" : "working"),
           activeAgentName: null,
           updatedAt: new Date(),
         })
