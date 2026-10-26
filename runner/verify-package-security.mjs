@@ -19,7 +19,7 @@ export function verifyRunnerPackages(npmRoot, corepackRoot) {
   const npmRequire = createRequire(join(resolve(npmRoot), "package.json"));
   for (const [name, minimum] of [
     ["brace-expansion", "5.0.12"],
-    ["ip-address", "10.7.1"],
+    ["ip-address", "10.7.4"],
     ["tar", "7.5.21"],
     ["undici", "6.28.1"],
   ]) {
