@@ -82,7 +82,7 @@ describe("durable story preview convergence", () => {
       storyId,
       revision: 1,
       declaredComplete: true,
-      updatedBy: { type: "user", id: "user_local_admin" },
+      updatedBy: { type: "user" as const, id: "user_local_admin" },
     });
     await db.insert(storyDeliveryPullRequests).values({
       orgId: "org_local",
@@ -350,7 +350,7 @@ describe("durable story preview convergence", () => {
         storyId,
         revision: 1,
         declaredComplete: false,
-        updatedBy: { type: "user", id: "user_local_admin" },
+        updatedBy: { type: "user" as const, id: "user_local_admin" },
       })),
     );
     await db
