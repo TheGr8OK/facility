@@ -419,6 +419,35 @@ describe("consultation capability and source contract", () => {
     }
   });
 
+  it.each([
+    "gpt-5.5",
+    "gpt-5.5-mini",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ])("rejects minimal effort for %s before making a provider request", async (model) => {
+    expect(consultationCapability("codex", model, "Review", "minimal")).toMatchObject({
+      eligible: false,
+      reason: "reasoning_api_unsupported",
+    });
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      callConsultationProvider({ ...input, model, reasoningEffort: "minimal" }, fetchImpl),
+    ).rejects.toMatchObject({ code: "reasoning_api_unsupported", certainty: "unbilled" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("accepts max only for the reviewed OpenAI 5.6 models", () => {
+    for (const model of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
+      expect(consultationCapability("codex", model, "Review", "max")).toMatchObject({
+        eligible: true,
+      });
+    expect(consultationCapability("codex", "gpt-5.5", "Review", "max")).toMatchObject({
+      eligible: false,
+      reason: "reasoning_api_unsupported",
+    });
+  });
+
   it("rejects malformed, encoded, credential and traversing paths before reading sources", () => {
     expect(ConsultationPath.parse("src/worker.ts")).toBe("src/worker.ts");
     for (const path of [

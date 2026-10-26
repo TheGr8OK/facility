@@ -60,7 +60,12 @@ export function sameConsultationModel(requested: string, returned: unknown) {
 // Reviewed API capabilities, separate from CLI/catalog acceptance and price availability.
 // https://platform.claude.com/docs/en/build-with-claude/effort
 const anthropicEfforts = ["low", "medium", "high", "xhigh", "max"];
-const openaiEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
+// https://developers.openai.com/api/docs/models/gpt-5.5
+const openaiEfforts = ["none", "low", "medium", "high", "xhigh"];
+// https://developers.openai.com/api/docs/models/gpt-5.6-sol
+// https://developers.openai.com/api/docs/models/gpt-5.6-terra
+// https://developers.openai.com/api/docs/models/gpt-5.6-luna
+const openai56Efforts = [...openaiEfforts, "max"];
 const consultationEfforts: Record<string, readonly string[]> = {
   "claude-fable-5-1": anthropicEfforts,
   "claude-opus-5-5": anthropicEfforts,
@@ -72,7 +77,7 @@ const consultationEfforts: Record<string, readonly string[]> = {
   "claude-haiku-4-5": [],
   "gpt-5.5": openaiEfforts,
   "gpt-5.5-mini": openaiEfforts,
-  "gpt-5.6-sol": openaiEfforts,
-  "gpt-5.6-terra": openaiEfforts,
-  "gpt-5.6-luna": openaiEfforts,
+  "gpt-5.6-sol": openai56Efforts,
+  "gpt-5.6-terra": openai56Efforts,
+  "gpt-5.6-luna": openai56Efforts,
 };
