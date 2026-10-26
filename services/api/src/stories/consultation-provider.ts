@@ -3,7 +3,7 @@ import { validModelUsage } from "../insights/model-calls.js";
 import type { AgentTurnUsage } from "../turns/engines.js";
 import {
   type ConsultationProvider,
-  consultationCapability,
+  consultationModelCapability,
   sameConsultationModel,
 } from "./consultation-policy.js";
 
@@ -47,10 +47,9 @@ export async function callConsultationProvider(
     throw new ConsultationProviderError("consultation_context_too_large", "unbilled");
   if (input.signal?.aborted)
     throw new ConsultationProviderError("consultation_canceled", "unbilled");
-  const capability = consultationCapability(
+  const capability = consultationModelCapability(
     input.provider === "anthropic" ? "claude_code" : "codex",
     input.model,
-    input.prompt,
     input.reasoningEffort,
   );
   if (!capability.eligible) throw new ConsultationProviderError(capability.reason, "unbilled");

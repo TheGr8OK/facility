@@ -108,6 +108,7 @@ enter a question. You can select up to four committed source files, each at an e
 options does not move a selected commit. The paid text executor uses saved task context and those
 files; it cannot access workspace files, native sessions, hooks or tools. A compatible project
 provider API key is required. An unavailable configuration stays unavailable without a substitute.
+The agent definition prompt and the larger saved task/source context have separate size limits.
 
 **Close consultation draft** keeps a separate draft for the same person, task and browser tab,
 using the same 24-hour storage limit as the normal composer. A failed submission preserves its
