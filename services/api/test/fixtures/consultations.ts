@@ -132,6 +132,7 @@ export async function consultationTestEnvironment() {
     const state = {
       model: "gpt-5.5",
       engine: "codex",
+      reasoningEffort: "high",
       catalogSha: "a".repeat(40),
       fileSha: "a".repeat(40),
       sourceText: "export const answer = 42;\n",
@@ -146,7 +147,7 @@ export async function consultationTestEnvironment() {
       sourceGate: undefined as Promise<void> | undefined,
     };
     const manifest = () =>
-      `---\nname: reviewer\ndescription: Review a task\nengine: ${state.engine}\nmodel: ${state.model}\noptions:\n  reasoning_effort: high\ntriggers:\n  - type: ui\n  - type: mcp\n---\nHelp review software work.\n`;
+      `---\nname: reviewer\ndescription: Review a task\nengine: ${state.engine}\nmodel: ${state.model}\noptions:\n  reasoning_effort: ${state.reasoningEffort}\ntriggers:\n  - type: ui\n  - type: mcp\n---\nHelp review software work.\n`;
     const blob = () => Buffer.from(state.sourceText);
     const blobSha = () =>
       createHash("sha1").update(`blob ${blob().length}\0`).update(blob()).digest("hex");
