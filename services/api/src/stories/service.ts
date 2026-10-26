@@ -589,7 +589,8 @@ export class StoryWorkspaceService {
           changed: false,
         };
       }
-      await releaseOpenTurnReservation(tx, input);
+      // A running provider may already have charged even when its dispatcher is lost.
+      if (turn.state === "queued") await releaseOpenTurnReservation(tx, input);
       const story = await scopedStory(tx, input.orgId, input.projectId, input.storyId);
       const remainingAttention = (
         await tx
