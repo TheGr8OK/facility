@@ -4,6 +4,7 @@ import type {
   WorkspaceLocator,
   WorkspaceRuntime,
 } from "../workspaces/runtime.js";
+import { ENGINE_PROCESS_CLEANUP } from "./engine-process-cleanup.js";
 import { ENGINE_USAGE_PROCESS } from "./usage-journal.js";
 
 export type AgentTurnRequest = {
@@ -167,7 +168,7 @@ abstract class CliAgentEngine implements AgentEngine {
   }
 }
 
-const ENGINE_PROCESS_WRAPPER = `set -eu
+export const ENGINE_PROCESS_WRAPPER = `set -eu
 case "$FACILITY_TURN_ID" in *[!A-Za-z0-9_-]*|'') exit 64 ;; esac
 marker_dir="$(dirname "$HOME")/engine-processes"
 marker="$marker_dir/$FACILITY_TURN_ID.pid"
@@ -180,8 +181,11 @@ cleanup() { rm -f "$marker"; }
 trap forward TERM INT HUP
 trap cleanup EXIT
 set +e
-wait "$child"
-status=$?
+while :; do
+  wait "$child"
+  status=$?
+  kill -0 "$child" 2>/dev/null || break
+done
 set -e
 exit "$status"`;
 
@@ -255,32 +259,13 @@ export async function stopInterruptedEngineProcess(
   }
   const result = await runtime.exec(workspace, {
     resume: false,
-    command: "sh",
-    args: ["-lc", INTERRUPTED_PROCESS_CLEANUP],
+    command: "node",
+    args: ["-e", ENGINE_PROCESS_CLEANUP],
     env: { FACILITY_INTERRUPTED_TURN_ID: turnId },
     timeoutMs: 15_000,
   });
   return result.exitCode === 0 ? result.stdout.trim() || "absent" : "cleanup failed";
 }
-
-const INTERRUPTED_PROCESS_CLEANUP = [
-  "set -eu",
-  'marker_dir="$(dirname "$HOME")/engine-processes"',
-  'marker="$marker_dir/$FACILITY_INTERRUPTED_TURN_ID.pid"',
-  'if ! test -f "$marker"; then printf absent; exit 0; fi',
-  'pid="$(cat "$marker")"',
-  'case "$pid" in *[!0-9]*|\'\') rm -f "$marker"; printf stale-marker; exit 0 ;; esac',
-  'if test -r "/proc/$pid/environ" && tr \'\\0\' \'\\n\' < "/proc/$pid/environ" | grep -Fqx "FACILITY_TURN_ID=$FACILITY_INTERRUPTED_TURN_ID"; then',
-  '  kill -TERM "$pid" 2>/dev/null || true',
-  "  attempt=0",
-  '  while kill -0 "$pid" 2>/dev/null && test "$attempt" -lt 50; do attempt=$((attempt + 1)); sleep 0.1; done',
-  '  if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi',
-  "  printf stopped",
-  "else",
-  "  printf stale-marker",
-  "fi",
-  'rm -f "$marker"',
-].join("\n");
 
 type ParsedEngineEvents = {
   sessionId?: string;
