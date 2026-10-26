@@ -59,10 +59,16 @@ function accept(line) {
   }
 }
 save();
-const child = spawn(process.argv[1], process.argv.slice(2), { stdio: ['inherit', 'pipe', 'inherit'] });
+const child = spawn(process.argv[1], process.argv.slice(2), { stdio: ['inherit', 'pipe', 'inherit'], detached: true });
+const processDir = path.join(path.dirname(process.env.HOME), 'engine-processes');
+fs.mkdirSync(processDir, { recursive: true, mode: 0o700 });
+const nativeMarker = path.join(processDir, turnId + '.native.pid');
+if (child.pid) fs.writeFileSync(nativeMarker, String(child.pid), { mode: 0o600 });
 // A dead observer closes stdout. Keep draining the CLI and journaling its usage.
 process.stdout.on('error', () => {});
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => child.kill(signal));
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => {
+  if (child.pid) { try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+});
 child.stdout.setEncoding('utf8');
 child.stdout.on('data', chunk => {
   // Journal first; losing the API worker must not lose the provider's final usage.

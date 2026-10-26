@@ -352,14 +352,20 @@ export async function recoverInterruptedTurns(
     .limit(1_000);
   let recovered = 0;
   for (const turn of running) {
-    if (
-      await stories.recoverInterruptedTurn({
+    let stopped: boolean;
+    try {
+      stopped = await stories.recoverInterruptedTurn({
         orgId: turn.orgId,
         projectId: turn.projectId,
         turnId: turn.id,
         staleBefore,
-      })
-    ) {
+      });
+    } catch {
+      // Keep this writer fenced for retry without starving other dead workers.
+      console.error(JSON.stringify({ event: "turn.cleanup_recovery_failed", turnId: turn.id }));
+      continue;
+    }
+    if (stopped) {
       recovered += 1;
       await onRecovered?.({
         orgId: turn.orgId,
