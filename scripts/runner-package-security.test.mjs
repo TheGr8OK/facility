@@ -25,7 +25,7 @@ test("image audit executes against real nested npm and both cached pnpm layouts"
   }
   pkg(npmRoot, "12.0.2");
   for (const [name, version] of [
-    ["brace-expansion", "5.0.12"], ["ip-address", "10.7.1"],
+    ["brace-expansion", "5.0.12"], ["ip-address", "10.7.4"],
     ["tar", "7.5.21"], ["undici", "6.28.1"],
   ]) pkg(join(globals, name), version);
   const copies = ["dist/node_modules/undici", "artifacts/exe/dist/node_modules/undici"]
@@ -45,6 +45,10 @@ test("image audit executes against real nested npm and both cached pnpm layouts"
   pkg(join(npmRoot, "node_modules/undici"), "6.28.0");
   assert.match(run().stderr, /npm undici: 6.28.0 is below security floor/);
   pkg(join(npmRoot, "node_modules/undici"), "6.28.1");
+  assert.equal(run().status, 0);
+  pkg(join(npmRoot, "node_modules/ip-address"), "10.7.1");
+  assert.match(run().stderr, /npm ip-address: 10.7.1 is below security floor/);
+  pkg(join(npmRoot, "node_modules/ip-address"), "10.7.4");
   assert.equal(run().status, 0);
   rmSync(cache, { recursive: true });
   mkdirSync(cache);

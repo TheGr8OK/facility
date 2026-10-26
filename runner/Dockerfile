@@ -316,7 +316,7 @@ ARG NPM_VERSION=12.0.2
 RUN npm install --global "npm@${NPM_VERSION}" \
   && npm install --global --omit=dev --ignore-scripts \
     brace-expansion@5.0.12 \
-    ip-address@10.7.1 \
+    ip-address@10.7.4 \
     tar@7.5.21 \
     undici@6.28.1 \
   && rm -rf \
