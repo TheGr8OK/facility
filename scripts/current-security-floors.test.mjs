@@ -9,6 +9,7 @@ const apiRequire = createRequire(new URL("../services/api/package.json", import.
 const root = resolve(import.meta.dirname, "..");
 const lock = apiRequire("yaml").parse(readFileSync(resolve(root, "pnpm-lock.yaml"), "utf8"));
 const floors = {
+  qs: { 6: "6.16.1" },
   zod: { 4: "4.6.6" },
   "body-parser": { 1: "1.20.9", 2: "2.4.0" },
   undici: { 6: UNDICI_6_SECURITY_FLOOR, 7: "7.30.1", 8: "8.12.2" },
