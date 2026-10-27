@@ -33,6 +33,7 @@ RUN archive=/tmp/moby.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=github.com/containerd/containerd/v2=github.com/containerd/containerd/v2@v2.3.6 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
@@ -62,6 +63,7 @@ RUN archive=/tmp/docker-cli.tar.gz \
   # Docker CLI keeps its reviewed module graph in vendor.mod/vendor.sum. \
   && cp vendor.mod go.mod \
   && cp vendor.sum go.sum \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
@@ -84,6 +86,7 @@ RUN archive=/tmp/containerd.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
@@ -106,6 +109,7 @@ RUN archive=/tmp/rootlesskit.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags='-s -w' -o /out/rootlesskit ./cmd/rootlesskit \
@@ -123,6 +127,7 @@ RUN archive=/tmp/buildx.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=github.com/moby/go-archive=github.com/moby/go-archive@v0.3.0 \
   && go mod edit -replace=github.com/containerd/containerd/v2=github.com/containerd/containerd/v2@v2.3.6 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
@@ -148,6 +153,7 @@ RUN archive=/tmp/compose.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=github.com/containerd/containerd/v2=github.com/containerd/containerd/v2@v2.3.6 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
@@ -170,6 +176,7 @@ RUN archive=/tmp/runc.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && GOFLAGS=-mod=mod make -C /src runc \
   && test "$(/src/runc --version | awk '/^go:/{print $2}')" = "go1.26.9" \
@@ -187,6 +194,7 @@ RUN archive=/tmp/gh.tar.gz \
   && mkdir -p /src /out \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
+  && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
@@ -210,6 +218,13 @@ RUN for binary in /out/*; do \
       '$1 == "dep" { pending = ($2 == "golang.org/x/net"); if (pending) version = $3; next } \
        pending && $1 == "=>" { if ($2 != "golang.org/x/net") { bad = 1; exit }; version = $3; pending = 0 } \
        END { if (bad) exit 1; if (version != "") exit (version != "v0.60.0") }' || exit 1; \
+  done \
+  && for binary in /out/*; do \
+    metadata="$(go version -m "$binary")" || exit 1; \
+    printf '%s\n' "$metadata" | awk \
+      '$1 == "dep" { pending = ($2 == "github.com/klauspost/compress"); if (pending) { found = 1; version = $3 }; next } \
+       pending && $1 == "=>" { if ($2 != "github.com/klauspost/compress") { bad = 1; exit }; version = $3; pending = 0 } \
+       END { exit (bad || (found && version != "v1.18.7")) }' || exit 1; \
   done \
   && for binary in /out/containerd /out/containerd-shim-runc-v2 /out/ctr /out/rootlesskit; do \
     go version -m "$binary" | awk \
