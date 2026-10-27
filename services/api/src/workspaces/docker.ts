@@ -465,7 +465,9 @@ function workspaceBootstrapCommand(input: CreateWorkspace) {
     "rm -f /workspace/.facility/runtime-ready",
     "mkdir -p /workspace/.facility/home /workspace/.facility/claude /workspace/.facility/codex /workspace/.facility/docker",
     "chown -R node:node /workspace",
-    "rm -f /var/run/docker.sock",
+    // Suspend keeps the container's writable layer, so dockerd runtime state from the previous
+    // boot survives a restart. Its pid files then name unrelated live processes and block startup.
+    "rm -rf /var/run/docker.sock /var/run/docker.pid /var/run/docker",
     "dockerd --host=unix:///var/run/docker.sock --data-root=/workspace/.facility/docker --storage-driver=vfs >/workspace/.facility/dockerd.log 2>&1 &",
     "attempt=0; until docker info >/dev/null 2>&1; do attempt=$((attempt + 1)); test $attempt -lt 120; sleep 1; done",
     "chown root:node /var/run/docker.sock",
