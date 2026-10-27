@@ -101,6 +101,30 @@ When the story needs attention:
 
 Canceling a turn does not roll back files or commits already written in the workspace.
 
+## Ask a read-only consultation
+
+In **Ask about this task**, choose **New consultation**, review the configured agent/model and
+enter a question. You can select up to four committed source files, each at an exact SHA. Refreshing
+options does not move a selected commit. The paid text executor uses saved task context and those
+files; it cannot access workspace files, native sessions, hooks or tools. A compatible project
+provider API key is required. An unavailable configuration stays unavailable without a substitute.
+The agent definition prompt and the larger saved task/source context have separate size limits.
+
+**Close consultation draft** keeps a separate draft for the same person, task and browser tab,
+using the same 24-hour storage limit as the normal composer. A failed submission preserves its
+original body/key for **Retry original consultation**. **Edit as a new request** explicitly creates
+a new intent. Refreshing history or preparing implementation starts no model or native turn.
+
+Inspect the saved result and **Snapshot and provenance** for source commits, hashes, watermark
+and omissions. Results render as text. **Cancel consultation** records cancellation; submitted
+usage may still be billed. An unconfirmed charge stays unknown, including when an admission
+estimate exists. Incomplete, failed or canceled consultations are not completed implementation.
+
+**Prepare implementation request** opens a separate editable composer with the completed result's
+ID and hash. Review the text and recipient, then choose **send to agent** to queue normal work.
+This action follows the existing execution permissions; preparing the draft itself starts nothing
+and does not confirm a plan or accept delivery.
+
 ## Agree on a versioned plan
 
 The story's **plan and decisions** panel shows the proposed text, repositories and configured
@@ -128,8 +152,7 @@ that all required PRs merged.
 
 With project write access, choose **Edit PR set**, find PRs in the project's GitHub mirror and
 select one required primary. Mark which PRs are required and confirm **These are all the PRs
-required to deliver this story**. Saving records metadata and history; it does not start an agent,
-accept work or merge a PR. Changing links clears the editor's completeness confirmation.
+required to deliver this story**. Saving records metadata and history. With workspace execution permission, **Save PR set and update preview** also authorizes Git updates and app rebuild/restart for this scope revision, retaining data. Saving does not start an AI agent, accept work or merge a PR. Changing links clears the editor's completeness confirmation.
 
 An automatic page refresh preserves unsaved selections. If somebody changes the saved set, a
 save reports a conflict and retains your edits. **Reload saved set (discard edits)** explicitly
@@ -146,6 +169,37 @@ commit hashes. GitHub still controls required checks and branch protection.
 semantics. The register preserves the existing source PR association and lifecycle; a source PR
 merge can still mark the story done while the delivery panel shows other required PRs outstanding.
 Acceptance, integration and all required merges remain separate facts.
+
+Preview execution requires `workspaces:execute`. Saving a delivery with that permission delegates
+convergence for that scope revision; a metadata-only writer can register the set, then an executor
+must review it and use **Retry preview**. A changed set needs fresh execution authorization.
+Webhook head updates retain the authorization for the same set; workers recheck the authorizer's
+current role or key before executing and while refreshing.
+
+Facility reconstructs each candidate from the configured development branch (default branch when
+unset) and the complete current required heads. Superseded or removed heads are excluded. Displaced
+local commits remain reachable under `refs/facility/retained/`; tracked local edits block publication
+until saved. Checkout refuses to overwrite ignored or untracked retained paths. Suspension and
+recovery preserve the volume and native sessions. Recovery retires abandoned compute and binds each attempt to its immutable provider identity, so delayed commands or stops cannot target a replacement. The next builder attaches to the converged revision, preserving the displaced branch under the retained refs. Dependency setup may rerun for new code; creation-only seed runs only on initial preparation or explicit clean setup.
+
+
+## Complete the source issue
+
+The completion panel separates the merged delivery, the configured post-merge integration and
+the source issue. Manual integration remains a human-recorded result. Repository dispatch waits
+for a result from the exact dispatched event. Completion requires both `projects:write` and
+`github:write`; changing integration policy requires both `projects:write` and `repos:write`.
+Ordinary project preferences preserve these policies.
+
+Repository-dispatch callbacks must set `event_id` to the `eventId` received in the
+`facility.delivery.merged` payload (`eventId` in MCP). A destination change or policy re-enable
+creates a new event. Identical terminal retries preserve the original receipt; conflicting
+terminal results are rejected. Manual integration uses a null event ID.
+
+Before the bounded GitHub close request, Facility rechecks the current candidate, integration,
+source binding and requesting principal. Delivery/policy mutations and local mirror updates are
+fenced through that request. A close response cannot replace a newer source observation, including a same-timestamp reopen. When the source changes, completion fails visibly and requires a fresh explicit request; automatic recovery cannot close it again. Closing an issue, suspending compute and retaining storage remain
+separate recorded results; this action does not merge PRs or delete persistent storage.
 
 ## Inspect and test the environment
 

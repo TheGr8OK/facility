@@ -42,6 +42,8 @@ vi.mock("../lib/api", async () => {
         record("conversation", { ok: true, data: mocks.conversation }),
       workspaceStoryEnvironment: async () =>
         record("environment", { ok: true, data: mocks.environment }),
+      workspaceStoryConsultations: async () =>
+        record("consultations", { ok: true, data: { items: [], total: 0, limit: 10, offset: 0 } }),
       workspaceStoryActivity: async () => record("activity", unexpected),
       workspaceStoryTimeline: async () => record("timeline", unexpected),
       workspaceStoryTurnEvent: async () => record("event", unexpected),
@@ -245,6 +247,32 @@ async function render() {
 }
 
 describe("story overview integration", () => {
+  it("shows actionable delivery notices without recasting them as agent errors", async () => {
+    setUp(["*"]);
+    mocks.bundle.attention = [
+      {
+        id: "delivery-notice",
+        turnId: null,
+        kind: "delivery_completion",
+        title: "Complete the source issue",
+        detail: "Review the exact source issue and explicitly request completion.",
+        status: "open",
+        resolution: null,
+        resolvedBy: null,
+        resolvedAt: null,
+        createdAt: at,
+      },
+    ];
+    const { root } = await render();
+    const attention = root.querySelector('[aria-label="Needs your attention"]');
+    expect(attention?.textContent).toContain("Complete the source issue");
+    expect(attention?.textContent).toContain(
+      "Review the exact source issue and explicitly request completion.",
+    );
+    expect(attention?.textContent).not.toContain("The run reported an error");
+    expect(attention?.textContent).not.toContain("Technical details");
+  });
+
   it("renders state, the final response first, participants, and folded evidence for a reader", async () => {
     setUp();
     const { html, root } = await render();
@@ -252,8 +280,9 @@ describe("story overview integration", () => {
     expect(root.textContent).toContain("Suspended");
     expect(root.textContent).toContain("In review");
     expect(root.querySelector('[aria-label="Needs your attention"]')).toBeNull();
-    // Only the story, its first conversation page and the environment inspection were requested.
-    expect(mocks.calls.sort()).toEqual(["conversation", "environment", "story"]);
+    // Initial reads include saved consultation history; no options, inference or workspace wake.
+    expect(mocks.calls.sort()).toEqual(["consultations", "conversation", "environment", "story"]);
+    expect(root.querySelector("#consultation")?.textContent).toContain("No consultations saved");
 
     const history = [...root.querySelectorAll("details")].find((d) =>
       d.querySelector("summary")?.textContent?.includes("Resolved and dismissed"),
