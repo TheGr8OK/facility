@@ -181,6 +181,28 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
     }
     await expect(runtime.inspect(workspace)).resolves.toMatchObject({ state: "destroyed" });
   }, 300_000);
+
+  it("has a working nested Docker daemon immediately after waking a suspended container", async () => {
+    const id = `ws_${randomBytes(12).toString("hex")}`;
+    const runtime = new DockerWorkspaceRuntime(new Docker());
+    const workspace = (await runtime.create({
+      id,
+      image: process.env.FACILITY_WORKSPACE_TEST_IMAGE ?? "facility-runner:serialized",
+    })) as WorkspaceLocator;
+    try {
+      const before = await runtime.exec(workspace, { command: "docker", args: ["info"] });
+      expect(before.exitCode, before.stderr).toBe(0);
+
+      await runtime.suspend(workspace);
+      await expect(runtime.inspect(workspace)).resolves.toMatchObject({ state: "sleeping" });
+
+      await runtime.wake(workspace);
+      const after = await runtime.exec(workspace, { command: "docker", args: ["info"] });
+      expect(after.exitCode, after.stderr).toBe(0);
+    } finally {
+      await runtime.destroy(workspace);
+    }
+  }, 300_000);
 });
 
 async function waitUntil(predicate: () => Promise<boolean>) {
