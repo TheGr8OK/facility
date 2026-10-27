@@ -39,7 +39,7 @@ import type {
 import { reconcileTurnBranch } from "./branch.js";
 import { isGithubIssueStory } from "./phase.js";
 import { authorizePlanExecution } from "./workflow-execution.js";
-import { lockWorkflowProject } from "./workflow-policy.js";
+import { lockWorkflowExecution, lockWorkflowProject } from "./workflow-policy.js";
 
 export type StoryActor = { type: "user" | "service" | "system"; id: string };
 
@@ -186,7 +186,11 @@ export class StoryWorkspaceService {
           "this story's workspace was explicitly deleted; start a new story identity",
         );
       }
-      await lockStory(tx, input.orgId, input.projectId, story.id);
+      await lockWorkflowExecution(
+        tx,
+        { orgId: input.orgId, projectId: input.projectId, storyId: story.id },
+        input.agent.name,
+      );
       await authorizePlanExecution(
         tx,
         { orgId: input.orgId, projectId: input.projectId, storyId: story.id },

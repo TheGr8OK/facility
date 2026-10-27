@@ -71,9 +71,24 @@ export async function lockWorkflowProject(db: FacilityDb, scope: WorkflowProject
 }
 export async function lockWorkflowStory(db: FacilityDb, scope: WorkflowScope) {
   await lockWorkflowProject(db, scope);
+  await lockStory(db, scope);
+}
+async function lockStory(db: FacilityDb, scope: WorkflowScope) {
   await db.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`facility:story:${scope.orgId}:${scope.projectId}:${scope.storyId}`}))`,
   );
+}
+/** Always fence policy changes. Ungated admission preserves the existing
+ * reservation/cancellation ordering and must not wait on the story fence. */
+export async function lockWorkflowExecution(
+  db: FacilityDb,
+  scope: WorkflowScope,
+  agentName: string,
+) {
+  await lockWorkflowProject(db, scope);
+  const { policy } = await readWorkflowPolicy(db, scope);
+  if (policy.planApprovalAgents.includes(agentName) || policy.holdAfterFailure)
+    await lockStory(db, scope);
 }
 export async function authorizeWorkflowHuman(
   db: FacilityDb,

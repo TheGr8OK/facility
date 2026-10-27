@@ -25,7 +25,7 @@ import {
   recordPlanExecution,
   WorkflowGateError,
 } from "../stories/workflow-execution.js";
-import { lockWorkflowStory } from "../stories/workflow-policy.js";
+import { lockWorkflowExecution } from "../stories/workflow-policy.js";
 import type {
   ProjectEnvironmentService,
   ProjectManifestSource,
@@ -550,7 +550,7 @@ export class TurnDispatcher {
       const admitted = await this.db.transaction(async (rawTx) => {
         const tx = rawTx as unknown as FacilityDb;
         const [existing] = await tx
-          .select({ storyId: turns.storyId })
+          .select({ storyId: turns.storyId, agentName: turns.agentName })
           .from(turns)
           .where(
             and(
@@ -562,7 +562,7 @@ export class TurnDispatcher {
           .limit(1);
         if (!existing) return null;
         const scope = { orgId: input.orgId, projectId: input.projectId, storyId: existing.storyId };
-        await lockWorkflowStory(tx, scope);
+        await lockWorkflowExecution(tx, scope, existing.agentName);
         const [queued] = await tx
           .select()
           .from(turns)
