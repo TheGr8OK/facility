@@ -92,7 +92,11 @@ export class DockerWorkspaceRuntime implements WorkspaceRuntime {
     const existing = await this.inspectContainer(names.container);
     if (!existing) return this.create(workspace);
     this.assertOwned(existing, workspace.id, names.volume);
-    if (!existing.State?.Running) await this.docker.getContainer(existing.Id).start();
+    if (!existing.State?.Running) {
+      const container = this.docker.getContainer(existing.Id);
+      await container.start();
+      await this.waitUntilReady(container);
+    }
     return this.handle(workspace, existing.Id, names);
   }
 
