@@ -225,6 +225,17 @@ it("preserves the converged next turn, fences delayed stops, and advertises deli
       initial,
     };
   }
+  const config = {
+    databaseUrl: url,
+    secretMasterKey: Buffer.alloc(32, 7).toString("base64"),
+    port: 4400,
+    publicUrl: "http://localhost:4400",
+    webUrl: "http://localhost:3400",
+    workspaceImage: "review:test",
+    workspaceDriver: "docker",
+    facilityInsecureDev: true,
+    logLevel: "silent",
+  };
   try {
     // The real successor TurnDispatcher invokes prepare() with no cleanSetup override.
     const f = await fixture("detached-handoff");
@@ -305,6 +316,138 @@ it("preserves the converged next turn, fences delayed stops, and advertises deli
     assert.equal(engineObservation.native, "retained-native-session");
     const projection = await preview.read(f.scope);
     assert.equal(projection.state, "ready");
+
+    // Suspend/restore must invalidate the old executor before admitting a native writer.
+    const suspended = await fixture("suspend-restore-writer");
+    const suspendedNative = join(suspended.ws.volumeRef, ".facility/codex/native-session");
+    await writeFile(suspendedNative, "retained-native-session");
+    await writeFile(join(suspended.repo, "retained-data.txt"), "retained application data");
+    const targetHead = await suspended.advance();
+    const suspensionDomain = createStoryDomain({
+      db,
+      config,
+      runtime: suspended.runtime,
+      enqueue: async () => undefined,
+      githubFactory: async () => {
+        throw new Error("No live provider may be called");
+      },
+    });
+    const suspendedPreview = suspensionDomain.previewConvergence;
+    await suspendedPreview.observe(suspended.scope);
+    const oldGitEntered = barrier(),
+      releaseOldGit = barrier();
+    const originalExec = suspended.runtime.exec.bind(suspended.runtime);
+    let holdOldGit = true;
+    suspended.runtime.exec = async (ws, command) => {
+      const result = await originalExec(ws, command);
+      if (
+        holdOldGit &&
+        command.command === "git" &&
+        command.args?.join(" ") === "rev-parse --git-dir"
+      ) {
+        holdOldGit = false;
+        oldGitEntered.resolve();
+        await releaseOldGit.promise;
+      }
+      return result;
+    };
+    const suspendedExecutor = new StoryPreviewConvergenceExecutor(
+      db,
+      suspended.runtime,
+      suspended.broker,
+      suspended.manifests,
+      suspended.environment,
+      suspendedPreview,
+    );
+    const suspendedRun = suspendedExecutor.dispatch(suspended.scope);
+    const nativeEntered = barrier(),
+      releaseNative = barrier();
+    let successorRun;
+    try {
+      await oldGitEntered.promise;
+      const suspendedService = suspensionDomain.stories;
+      const oldCompute = (await suspended.runtime.inspect(suspended.ws)).computeRef;
+      await suspendedService.suspend(
+        suspended.scope.orgId,
+        suspended.scope.projectId,
+        suspended.scope.storyId,
+      );
+      await suspendedService.restore(
+        suspended.scope.orgId,
+        suspended.scope.projectId,
+        suspended.scope.storyId,
+      );
+      let firstHead, secondHead;
+      const successorEngine = {
+        name: "codex",
+        run: async () => {
+          firstHead = await git(suspended.repo, ["rev-parse", "HEAD"]);
+          nativeEntered.resolve();
+          await releaseNative.promise;
+          secondHead = await git(suspended.repo, ["rev-parse", "HEAD"]);
+          return {
+            nativeSessionId: "retained-native-session",
+            output: "Continued safely.",
+            progress: [],
+            events: [],
+            exitCode: 0,
+            stderr: "",
+            durationMs: 1,
+          };
+        },
+      };
+      const successorDispatcher = new TurnDispatcher(
+        db,
+        suspendedService,
+        {},
+        suspended.broker,
+        suspended.manifests,
+        suspended.environment,
+        new AgentEngineRegistry([successorEngine]),
+        new TurnGitEvidenceService(db, suspended.runtime),
+        undefined,
+        suspended.runtime,
+      );
+      const successor = await suspendedService.queueMessage({
+        ...suspended.scope,
+        body: "Continue after restoring the preview.",
+        dedupeKey: randomUUID(),
+        agent,
+        actor,
+        trigger: { type: "manual" },
+      });
+      assert.ok(successor.turn);
+      successorRun = successorDispatcher.dispatch({
+        ...suspended.scope,
+        turnId: successor.turn.id,
+      });
+      await nativeEntered.promise;
+      releaseOldGit.resolve();
+      const staleResult = await suspendedRun;
+      assert.equal(firstHead, suspended.A);
+      assert.equal(
+        await git(suspended.repo, ["rev-parse", "HEAD"]),
+        suspended.A,
+        "a superseded preview must not change Git during its successor's active engine",
+      );
+      assert.notEqual((await suspended.runtime.inspect(suspended.ws)).computeRef, oldCompute);
+      assert.notEqual(staleResult.state, "ready");
+      assert.equal((await suspendedPreview.read(suspended.scope)).state, "pending");
+      releaseNative.resolve();
+      assert.equal((await successorRun).state, "succeeded");
+      assert.equal(secondHead, suspended.A);
+      assert.equal(await readFile(suspendedNative, "utf8"), "retained-native-session");
+      assert.equal(
+        await readFile(join(suspended.repo, "retained-data.txt"), "utf8"),
+        "retained application data",
+      );
+      assert.equal((await suspendedExecutor.dispatch(suspended.scope)).state, "ready");
+      assert.equal(await git(suspended.repo, ["rev-parse", "HEAD"]), targetHead);
+    } finally {
+      releaseOldGit.resolve();
+      releaseNative.resolve();
+      await Promise.allSettled([suspendedRun, successorRun]);
+    }
 
     // Full executor/controller/DB race: delay only the old stop provider call.
     const firstStop = barrier(),
@@ -437,17 +580,6 @@ it("preserves the converged next turn, fences delayed stops, and advertises deli
       roleId: "role_review_pr498",
     });
     const jobs = [];
-    const config = {
-      databaseUrl: url,
-      secretMasterKey: Buffer.alloc(32, 7).toString("base64"),
-      port: 4400,
-      publicUrl: "http://localhost:4400",
-      webUrl: "http://localhost:3400",
-      workspaceImage: "review:test",
-      workspaceDriver: "docker",
-      facilityInsecureDev: true,
-      logLevel: "silent",
-    };
     const domain = createStoryDomain({
       db,
       config,

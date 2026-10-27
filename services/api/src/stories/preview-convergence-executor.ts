@@ -26,6 +26,31 @@ import {
 
 const MAX_DIRTY_PATHS = 1_000;
 
+/** Called with the convergence row locked, before suspension releases its writer. */
+export async function retirePreviewWriter(
+  db: FacilityDb,
+  runtime: WorkspaceRuntime,
+  scope: PreviewConvergenceScope,
+) {
+  const [workspace] = await db
+    .select()
+    .from(workspaces)
+    .where(
+      and(
+        eq(workspaces.orgId, scope.orgId),
+        eq(workspaces.projectId, scope.projectId),
+        eq(workspaces.storyId, scope.storyId),
+      ),
+    )
+    .orderBy(desc(workspaces.createdAt))
+    .limit(1);
+  if (!workspace) throw new Error("preview_workspace_missing");
+  const locator = workspaceLocator(workspace);
+  const compute = await runtime.inspect(locator);
+  if (compute.computeRef)
+    await runtime.retireCompute({ ...locator, expectedComputeRef: compute.computeRef });
+}
+
 export class PreviewConvergenceError extends Error {
   constructor(
     readonly code: string,
