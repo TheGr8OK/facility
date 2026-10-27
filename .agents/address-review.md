@@ -5,7 +5,7 @@ engine: codex
 model: gpt-5.6-sol
 options:
   reasoning_effort: high
-enabled: true
+enabled: false
 triggers:
   - type: manual
   - type: mcp

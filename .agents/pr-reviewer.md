@@ -3,7 +3,7 @@ name: pr-reviewer
 description: Reviews a story pull request from a fresh context and reports actionable findings.
 engine: claude_code
 model: claude-sonnet-5-5
-enabled: true
+enabled: false
 triggers:
   - type: manual
   - type: mcp
