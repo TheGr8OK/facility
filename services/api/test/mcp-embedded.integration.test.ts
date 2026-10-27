@@ -126,10 +126,14 @@ describe("embedded MCP control plane", async () => {
 
   it("serves the reduced tool catalog from the API process", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(40);
+    expect(tools.tools).toHaveLength(44);
     expect(tools.tools.map((tool) => tool.name)).toContain("facility_start_story");
     expect(tools.tools.map((tool) => tool.name)).toContain("facility_list_skills");
     for (const name of [
+      "facility_get_workflow_policy",
+      "facility_get_story_workflow",
+      "facility_get_delivery_acceptance",
+      "facility_request_delivery_acceptance",
       "facility_get_plan",
       "facility_propose_plan",
       "facility_request_plan_decision",
@@ -181,5 +185,24 @@ describe("embedded MCP control plane", async () => {
       decision: null,
       state: { revision: 0, decisionRevision: 0, status: "none" },
     });
+  });
+  it("reads workflow policy and acceptance from the same authenticated domain as the UI", async () => {
+    for (const name of ["facility_get_story_workflow", "facility_get_delivery_acceptance"]) {
+      const result = await client.callTool({ name, arguments: { projectId, storyId } });
+      expect(result.isError).not.toBe(true);
+      const text = (result.content as Array<{ type: string; text?: string }>).find(
+        (part) => part.type === "text",
+      )?.text;
+      const payload = JSON.parse(text ?? "{}");
+      expect(payload).toMatchObject({ projectId, storyId });
+      if (name === "facility_get_delivery_acceptance")
+        expect(payload).toMatchObject({ required: false, status: "missing", receipt: null });
+      else
+        expect(payload).toMatchObject({
+          acceptance: { required: false, status: "missing" },
+          blockedReason: null,
+          queuedAgents: [],
+        });
+    }
   });
 });

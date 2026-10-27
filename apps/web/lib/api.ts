@@ -189,6 +189,18 @@ export const api = {
         `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/consultations`,
       ),
     ),
+  projectWorkflowPolicy: (projectId: string) =>
+    apiFetch("GET", `/v1/projects/${encodeURIComponent(projectId)}/workflow-policy`),
+  storyWorkflow: (projectId: string, storyId: string) =>
+    apiFetch(
+      "GET",
+      `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/workflow`,
+    ),
+  reviewDeliveryAcceptance: (projectId: string, storyId: string, requestId: string) =>
+    apiFetch(
+      "GET",
+      `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/delivery-acceptance/${encodeURIComponent(requestId)}`,
+    ),
   reviewStoryPlanDecision: (projectId: string, storyId: string, requestId: string) =>
     apiFetch(
       "GET",

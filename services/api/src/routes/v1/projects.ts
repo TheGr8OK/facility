@@ -44,6 +44,7 @@ const ProjectSettings = z
   .object({
     deliveryIntegration: z.never().optional(),
     deliveryNotices: z.never().optional(),
+    storyWorkflow: z.never().optional(),
     nativePreviewsEnabled: z.boolean().optional(),
     developmentBranch: DevelopmentBranchSchema.nullable().optional(),
   })
@@ -353,14 +354,9 @@ export async function registerProjectRoutes(app: FastifyInstance, context: V1Rou
                 ...(fields.settings === undefined
                   ? {}
                   : {
-                      settings: {
-                        ...fields.settings,
-                        ...Object.fromEntries(
-                          Object.entries(current.settings as Record<string, unknown>).filter(
-                            ([key]) => ["deliveryIntegration", "deliveryNotices"].includes(key),
-                          ),
-                        ),
-                      },
+                      // Preserve the latest reserved controls atomically, including
+                      // policy changes committed after this request began reading.
+                      settings: sql`${JSON.stringify(fields.settings)}::jsonb || (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from jsonb_each(${projects.settings}) where key in ('deliveryIntegration', 'deliveryNotices', 'storyWorkflow'))`,
                     }),
                 // The narrow UI update preserves unrelated settings, including concurrent writes.
                 ...(Object.keys(preferences).length === 0

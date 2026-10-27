@@ -96,7 +96,8 @@ export function PlanConfirmation({ initial }: { initial: PlanDecisionReview }) {
         </h1>
         <p className="text-sm text-(--mut)">
           This decision applies to revision {review.plan.revision} and the repositories and agents
-          below. Confirmation does not start agents or accept delivery.
+          below. Depending on project policy, approval may release queued agents immediately. It
+          does not accept the final delivery.
         </p>
       </header>
       <PlanContent plan={review.plan} />

@@ -1,4 +1,5 @@
 import type {
+  DeliveryAcceptanceSnapshot,
   PlanActor,
   PlanAgent,
   PlanRepository,
@@ -2395,5 +2396,98 @@ export const githubChecks = pgTable(
         projectRepositories.id,
       ],
     }),
+  ],
+);
+
+export const storyDeliveryAcceptanceRequests = pgTable(
+  "story_delivery_acceptance_requests",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    projectId: text("project_id").notNull(),
+    storyId: text("story_id").notNull(),
+    snapshot: jsonb("snapshot").$type<DeliveryAcceptanceSnapshot>().notNull(),
+    requestedBy: jsonb("requested_by").$type<PlanActor>().notNull(),
+    boundUserId: text("bound_user_id"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedByUserId: text("consumed_by_user_id"),
+  },
+  (table) => [
+    unique("story_delivery_acceptance_requests_scope_uidx").on(
+      table.orgId,
+      table.projectId,
+      table.storyId,
+      table.id,
+    ),
+    foreignKey({
+      name: "story_delivery_acceptance_requests_story_fk",
+      columns: [table.orgId, table.projectId, table.storyId],
+      foreignColumns: [stories.orgId, stories.projectId, stories.id],
+    }),
+    check(
+      "story_delivery_acceptance_requests_snapshot_check",
+      sql`jsonb_typeof(${table.snapshot}) = 'object' and octet_length(${table.snapshot}::text) <= 100000`,
+    ),
+    check(
+      "story_delivery_acceptance_requests_requested_by_check",
+      sql`jsonb_typeof(${table.requestedBy}) = 'object' and coalesce(${table.requestedBy}->>'type' in ('user', 'service'), false) and octet_length(${table.requestedBy}::text) <= 2048`,
+    ),
+    check(
+      "story_delivery_acceptance_requests_expiry_check",
+      sql`${table.expiresAt} > ${table.requestedAt}`,
+    ),
+    check(
+      "story_delivery_acceptance_requests_consumed_check",
+      sql`(${table.consumedAt} is null) = (${table.consumedByUserId} is null)`,
+    ),
+    index("story_delivery_acceptance_requests_pending_idx")
+      .on(table.orgId, table.projectId, table.storyId, table.expiresAt)
+      .where(sql`${table.consumedAt} is null`),
+  ],
+);
+
+export const storyDeliveryAcceptances = pgTable(
+  "story_delivery_acceptances",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    projectId: text("project_id").notNull(),
+    storyId: text("story_id").notNull(),
+    revision: integer("revision").notNull(),
+    requestId: text("request_id").notNull().unique(),
+    snapshot: jsonb("snapshot").$type<DeliveryAcceptanceSnapshot>().notNull(),
+    confirmedBy: jsonb("confirmed_by").$type<PlanActor & { type: "user" }>().notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
+    method: text("method").$type<"interactive_session">().notNull().default("interactive_session"),
+  },
+  (table) => [
+    unique("story_delivery_acceptances_revision_uidx").on(table.storyId, table.revision),
+    foreignKey({
+      name: "story_delivery_acceptances_story_fk",
+      columns: [table.orgId, table.projectId, table.storyId],
+      foreignColumns: [stories.orgId, stories.projectId, stories.id],
+    }),
+    foreignKey({
+      name: "story_delivery_acceptances_request_fk",
+      columns: [table.orgId, table.projectId, table.storyId, table.requestId],
+      foreignColumns: [
+        storyDeliveryAcceptanceRequests.orgId,
+        storyDeliveryAcceptanceRequests.projectId,
+        storyDeliveryAcceptanceRequests.storyId,
+        storyDeliveryAcceptanceRequests.id,
+      ],
+    }),
+    check("story_delivery_acceptances_revision_check", sql`${table.revision} > 0`),
+    check(
+      "story_delivery_acceptances_snapshot_check",
+      sql`jsonb_typeof(${table.snapshot}) = 'object' and octet_length(${table.snapshot}::text) <= 100000`,
+    ),
+    check(
+      "story_delivery_acceptances_confirmed_by_check",
+      sql`jsonb_typeof(${table.confirmedBy}) = 'object' and coalesce(${table.confirmedBy}->>'type' = 'user', false) and octet_length(${table.confirmedBy}::text) <= 2048`,
+    ),
+    check("story_delivery_acceptances_method_check", sql`${table.method} = 'interactive_session'`),
   ],
 );

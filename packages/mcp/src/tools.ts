@@ -5,6 +5,7 @@ import {
   RecordDeliveryIntegrationBody,
   ReplaceStoryDeliveryBody,
   RequestConsultationBody,
+  RequestDeliveryAcceptanceBody,
   RequestPlanDecisionBody,
   RequestStoryCompletionBody,
 } from "@facility/core";
@@ -298,6 +299,61 @@ export const toolDefinitions: ToolDefinition[] = [
     idempotencyKey: (args) => stringValue(args.idempotencyKey),
     write: true,
     openWorld: true,
+  },
+  {
+    name: "facility_get_workflow_policy",
+    permission: "projects:read",
+    description:
+      "Read the current project plan/execution and delivery acceptance policy. Changes require an interactive Facility settings confirmation; this tool never changes policy. Needs projects:read.",
+    inputSchema: { projectId },
+    method: "GET",
+    path: (args) => `/v1/projects/${part(args.projectId)}/workflow-policy`,
+  },
+  {
+    name: "facility_get_story_workflow",
+    permission: "projects:read",
+    description:
+      "Read current plan approval, held native agents and exact delivery acceptance as separate states. Approval can release queued agents under project policy. Needs projects:read.",
+    inputSchema: { projectId, storyId },
+    method: "GET",
+    path: (args) =>
+      `/v1/projects/${part(args.projectId)}/workspace-stories/${part(args.storyId)}/workflow`,
+  },
+  {
+    name: "facility_get_delivery_acceptance",
+    permission: "projects:read",
+    description:
+      "Read current, missing or stale human acceptance of the exact required PR heads and plan/policy revisions. Needs projects:read.",
+    inputSchema: { projectId, storyId },
+    method: "GET",
+    path: (args) =>
+      `/v1/projects/${part(args.projectId)}/workspace-stories/${part(args.storyId)}/delivery-acceptance`,
+  },
+  {
+    name: "facility_request_delivery_acceptance",
+    permission: "projects:write",
+    description:
+      "Request an expiring interactive Facility review link for the current exact delivery. Read the candidate and workflow first. This tool cannot record a human acceptance or bypass plan/preview/completion policy. Needs projects:write.",
+    inputSchema: {
+      projectId,
+      storyId,
+      candidateRevision: RequestDeliveryAcceptanceBody.shape.expected_candidate_revision,
+      expectedPlanRevision: RequestDeliveryAcceptanceBody.shape.expected_plan_revision,
+      expectedDecisionRevision: RequestDeliveryAcceptanceBody.shape.expected_decision_revision,
+      idempotencyKey,
+    },
+    method: "POST",
+    write: true,
+    path: (args) =>
+      `/v1/projects/${part(args.projectId)}/workspace-stories/${part(args.storyId)}/delivery-acceptance`,
+    body: (args) =>
+      RequestDeliveryAcceptanceBody.parse({
+        expected_candidate_revision: args.candidateRevision,
+        expected_plan_revision: args.expectedPlanRevision,
+        expected_decision_revision: args.expectedDecisionRevision,
+        idempotency_key: args.idempotencyKey,
+      }),
+    idempotencyKey: (args) => stringValue(args.idempotencyKey),
   },
   {
     name: "facility_get_plan",

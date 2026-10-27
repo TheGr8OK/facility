@@ -13,10 +13,19 @@ import {
 } from "@facility/db";
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { type AgentCatalogService, manifestFromProjection } from "../agents/catalog.js";
+import { ApiError } from "../errors.js";
 import { githubRateLimitRetryAt } from "../github/rate-limit.js";
 import type { GithubWorkspaceCredentialBroker } from "../github/workspace-credentials.js";
 import { BudgetPolicyError, CostBudgetService } from "../insights/costs.js";
 import type { StoryWorkspaceService } from "../stories/service.js";
+import {
+  authorizePlanExecution,
+  type PlanExecutionAuthorization,
+  planExecutionStillAuthorized,
+  recordPlanExecution,
+  WorkflowGateError,
+} from "../stories/workflow-execution.js";
+import { lockWorkflowStory } from "../stories/workflow-policy.js";
 import type {
   ProjectEnvironmentService,
   ProjectManifestSource,
@@ -50,6 +59,13 @@ export class TurnDispatcher {
   async dispatch(input: { orgId: string; projectId: string; turnId: string }) {
     const admission = await this.admit(input);
     if (admission.kind === "unclaimed") return { claimed: false as const };
+    if (admission.kind === "held")
+      return {
+        claimed: false as const,
+        state: "held" as const,
+        code: admission.code,
+        error: admission.error,
+      };
     if (admission.kind === "denied") {
       return { claimed: true as const, state: "failed" as const, error: admission.error };
     }
@@ -523,6 +539,7 @@ export class TurnDispatcher {
   private async admit(input: { orgId: string; projectId: string; turnId: string }): Promise<
     | { kind: "unclaimed" }
     | { kind: "denied"; error: string }
+    | { kind: "held"; code: string; error: string }
     | {
         kind: "running";
         turn: typeof turns.$inferSelect;
@@ -532,11 +549,105 @@ export class TurnDispatcher {
     try {
       const admitted = await this.db.transaction(async (rawTx) => {
         const tx = rawTx as unknown as FacilityDb;
+        const [existing] = await tx
+          .select({ storyId: turns.storyId })
+          .from(turns)
+          .where(
+            and(
+              eq(turns.orgId, input.orgId),
+              eq(turns.projectId, input.projectId),
+              eq(turns.id, input.turnId),
+            ),
+          )
+          .limit(1);
+        if (!existing) return null;
+        const scope = { orgId: input.orgId, projectId: input.projectId, storyId: existing.storyId };
+        await lockWorkflowStory(tx, scope);
+        const [queued] = await tx
+          .select()
+          .from(turns)
+          .where(
+            and(
+              eq(turns.orgId, input.orgId),
+              eq(turns.projectId, input.projectId),
+              eq(turns.id, input.turnId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (queued?.state !== "queued" || (queued.retryAfter && queued.retryAfter > new Date()))
+          return null;
+        let authorization: PlanExecutionAuthorization | null;
+        try {
+          authorization = await authorizePlanExecution(
+            tx,
+            scope,
+            AgentManifestSchema.parse(queued.manifest),
+            queued.createdBy as { type: "user" | "service" | "system"; id: string },
+            queued.id,
+          );
+        } catch (error) {
+          if (
+            !(error instanceof WorkflowGateError) &&
+            !(error instanceof ApiError && error.code.startsWith("workflow_"))
+          )
+            throw error;
+          const retryAfter = new Date(Date.now() + 30_000);
+          await tx
+            .update(turns)
+            .set({ retryAfter, error: `${error.code}: ${error.message}`, updatedAt: new Date() })
+            .where(eq(turns.id, queued.id));
+          const [attention] = await tx
+            .select({ id: attentionItems.id })
+            .from(attentionItems)
+            .where(
+              and(
+                eq(attentionItems.orgId, scope.orgId),
+                eq(attentionItems.projectId, scope.projectId),
+                eq(attentionItems.storyId, scope.storyId),
+                eq(attentionItems.turnId, queued.id),
+                eq(attentionItems.kind, "workflow_approval"),
+                eq(attentionItems.status, "open"),
+              ),
+            )
+            .limit(1);
+          if (!attention) {
+            await tx.insert(attentionItems).values({
+              id: newId("attn"),
+              ...scope,
+              turnId: queued.id,
+              kind: "workflow_approval",
+              title: `${queued.agentName} is waiting for workflow approval`,
+              detail: error.message,
+            });
+            await appendTurnEvent(tx, {
+              ...scope,
+              turnId: queued.id,
+              type: "turn.workflow_held",
+              data: { code: error.code, reason: error.message },
+            });
+          }
+          await tx
+            .update(stories)
+            .set({
+              status: sql`case when ${stories.status} in ('archived', 'done') then ${stories.status} else 'attention' end`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(stories.orgId, scope.orgId),
+                eq(stories.projectId, scope.projectId),
+                eq(stories.id, scope.storyId),
+              ),
+            );
+          return { kind: "held" as const, code: error.code, error: error.message };
+        }
         const claimed = (
           await tx
             .update(turns)
             .set({
               state: "running",
+              error: null,
               retryAfter: null,
               startedAt: new Date(),
               updatedAt: new Date(),
@@ -553,6 +664,26 @@ export class TurnDispatcher {
             .returning()
         )[0];
         if (!claimed) return null;
+        await recordPlanExecution(tx, scope, claimed.id, authorization);
+        await tx
+          .update(attentionItems)
+          .set({
+            status: "resolved",
+            resolution: "workflow_authorized",
+            resolvedAt: new Date(),
+            resolvedBy: { type: "system", id: "workflow-admission" },
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(attentionItems.orgId, scope.orgId),
+              eq(attentionItems.projectId, scope.projectId),
+              eq(attentionItems.storyId, scope.storyId),
+              eq(attentionItems.turnId, claimed.id),
+              eq(attentionItems.kind, "workflow_approval"),
+              eq(attentionItems.status, "open"),
+            ),
+          );
         const reservationId = await this.costs.reserveTurn(tx, {
           orgId: input.orgId,
           projectId: input.projectId,
@@ -560,7 +691,7 @@ export class TurnDispatcher {
           turnId: claimed.id,
           model: claimed.model,
         });
-        return { turn: claimed, reservationId };
+        return { kind: "running" as const, turn: claimed, reservationId };
       });
       if (!admitted) {
         const unclaimed = await this.turn(input.orgId, input.projectId, input.turnId);
@@ -569,6 +700,7 @@ export class TurnDispatcher {
         }
         return { kind: "unclaimed" };
       }
+      if (admitted.kind === "held") return admitted;
       return { kind: "running", turn: admitted.turn, reservationId: admitted.reservationId };
     } catch (error) {
       if (!(error instanceof BudgetPolicyError)) throw error;
@@ -601,6 +733,16 @@ export class TurnDispatcher {
   }
 
   private async heartbeat(orgId: string, projectId: string, turnId: string) {
+    const turn = await this.turn(orgId, projectId, turnId);
+    if (
+      turn?.state !== "running" ||
+      !(await planExecutionStillAuthorized(
+        this.db,
+        { orgId, projectId, storyId: turn.storyId },
+        turn,
+      ))
+    )
+      return false;
     const alive = await this.db
       .update(turns)
       .set({ updatedAt: new Date() })

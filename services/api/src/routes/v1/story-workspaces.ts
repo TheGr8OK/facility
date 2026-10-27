@@ -36,6 +36,7 @@ import {
 import { principal } from "./shared.js";
 import { registerStoryConsultationRoutes } from "./story-consultations.js";
 import { registerStoryPlanRoutes } from "./story-plans.js";
+import { registerStoryWorkflowRoutes } from "./story-workflow.js";
 
 const ProjectParams = z.object({ projectId: z.string() });
 const StoryParams = z.object({ projectId: z.string(), storyId: z.string() });
@@ -119,6 +120,7 @@ const RetryPreviewConvergenceBody = z
 export async function registerStoryWorkspaceRoutes(app: FastifyInstance, config: AppConfig) {
   const domain = app.storyDomain;
   await registerStoryPlanRoutes(app, config);
+  await registerStoryWorkflowRoutes(app, config);
   await registerStoryConsultationRoutes(app);
 
   app.get(

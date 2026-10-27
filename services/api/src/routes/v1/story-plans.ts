@@ -24,6 +24,7 @@ import {
   requestStoryPlanDecision,
   reviewStoryPlanDecision,
 } from "../../stories/plans.js";
+import { releaseWorkflowQueue } from "../../stories/workflow-status.js";
 import type { AppConfig } from "../../types.js";
 import { principal } from "./shared.js";
 
@@ -224,7 +225,7 @@ export async function registerStoryPlanRoutes(app: FastifyInstance, config: AppC
     async (request, reply) => {
       const body = request.body as z.infer<typeof ConfirmPlanDecisionBody>;
       reply.header("cache-control", "private, no-store");
-      return confirmStoryPlanDecision(
+      const result = await confirmStoryPlanDecision(
         app.facilityDb,
         scope(request),
         (request.params as z.infer<typeof DecisionParams>).requestId,
@@ -233,6 +234,11 @@ export async function registerStoryPlanRoutes(app: FastifyInstance, config: AppC
         config.secretMasterKey,
         options,
       );
+      if (result.state.status === "approved")
+        await releaseWorkflowQueue(app.facilityDb, scope(request), (queue, data) =>
+          app.enqueue(queue, data),
+        );
+      return result;
     },
   );
 }

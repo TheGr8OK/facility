@@ -13,6 +13,7 @@ import { StoryDeliveryPanel } from "@/components/story/story-delivery";
 import { StoryPlanPanel } from "@/components/story/story-plan";
 import { StoryPreviewConvergencePanel } from "@/components/story/story-preview-convergence";
 import { StoryTimeline } from "@/components/story/story-timeline";
+import { StoryWorkflowPanel } from "@/components/story/story-workflow";
 import { WorkspaceVariables } from "@/components/story/workspace-variables";
 import { api, type StoryEnvironment } from "@/lib/api";
 import { titleStatus } from "@/lib/backlog-presentation";
@@ -43,14 +44,16 @@ export default async function StoryPage({
   params: Promise<{ projectId: string; number: string }>;
 }) {
   const { projectId, number: storyId } = await params;
-  const [detail, conversation, environment, agents, me, consultations] = await Promise.all([
-    api.workspaceStory(projectId, storyId),
-    api.workspaceStoryConversation(projectId, storyId),
-    api.workspaceStoryEnvironment(projectId, storyId),
-    api.storyAgents(projectId),
-    api.me(),
-    api.workspaceStoryConsultations(projectId, storyId),
-  ]);
+  const [detail, conversation, environment, agents, me, consultations, workflow] =
+    await Promise.all([
+      api.workspaceStory(projectId, storyId),
+      api.workspaceStoryConversation(projectId, storyId),
+      api.workspaceStoryEnvironment(projectId, storyId),
+      api.storyAgents(projectId),
+      api.me(),
+      api.workspaceStoryConsultations(projectId, storyId),
+      api.storyWorkflow(projectId, storyId),
+    ]);
 
   if (!detail.ok) {
     if (detail.offline) return <Offline />;
@@ -218,6 +221,16 @@ export default async function StoryPage({
         canWrite={canWrite && story.deletedAt === null}
         userId={me.ok ? (me.data.principal?.userId ?? me.data.principal?.id) : undefined}
       />
+
+      {workflow.ok ? (
+        <StoryWorkflowPanel
+          initial={workflow.data}
+          canWrite={canWrite && story.deletedAt === null}
+          candidateReady={bundle.delivery?.candidate.state === "recorded"}
+        />
+      ) : (
+        <ErrorNotice message={`Workflow status unavailable: ${workflow.message}`} />
+      )}
 
       <StoryDeliveryPanel
         key={JSON.stringify([me.ok ? me.data.principal?.id : null, projectId, story.id])}

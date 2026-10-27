@@ -532,3 +532,28 @@ export type BacklogItem = ArrayItem<ProjectBacklog["items"]>;
 export type BacklogPhase = BacklogItem["phase"];
 export type BacklogPerson = ArrayItem<BacklogItem["assignees"]>;
 export type BacklogQuery = FacilityGeneratedQuery<"GET", "/v1/projects/{projectId}/backlog">;
+
+export type StoryWorkflowPolicyState = FacilityGeneratedResponse<
+  "get",
+  "/v1/projects/{projectId}/workflow-policy"
+>;
+export type WorkflowPolicyReview = FacilityGeneratedResponse<
+  "post",
+  "/v1/projects/{projectId}/workflow-policy/review"
+>;
+export type StoryWorkflowStatus = FacilityGeneratedResponse<
+  "get",
+  "/v1/projects/{projectId}/workspace-stories/{storyId}/workflow"
+>;
+export type StoryDeliveryAcceptance = FacilityGeneratedResponse<
+  "get",
+  "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance"
+>;
+export type DeliveryAcceptanceRequest = FacilityGeneratedResponse<
+  "post",
+  "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance"
+>;
+export type DeliveryAcceptanceReview = FacilityGeneratedResponse<
+  "get",
+  "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance/{requestId}"
+>;

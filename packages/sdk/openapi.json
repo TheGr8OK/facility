@@ -3970,6 +3970,9 @@
                       "deliveryNotices": {
                         "not": {}
                       },
+                      "storyWorkflow": {
+                        "not": {}
+                      },
                       "nativePreviewsEnabled": {
                         "type": "boolean"
                       },
@@ -4402,6 +4405,9 @@
                         "not": {}
                       },
                       "deliveryNotices": {
+                        "not": {}
+                      },
+                      "storyWorkflow": {
                         "not": {}
                       },
                       "nativePreviewsEnabled": {
@@ -13241,13 +13247,11 @@
         ],
         "security": [
           {
-            "bearerAuth": []
-          },
-          {
             "sessionCookie": []
           }
         ],
-        "x-facility-permission": "projects:write"
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
       }
     },
     "/v1/projects/{projectId}/workspace-stories/{storyId}/plan/decisions/{requestId}/confirm": {
@@ -14076,6 +14080,1740 @@
         ],
         "security": [
           {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
+      }
+    },
+    "/v1/projects/{projectId}/workflow-policy": {
+      "get": {
+        "operationId": "getProjectWorkflowPolicy",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483646
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "planApprovalAgents": {
+                          "default": [],
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "holdAfterFailure": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requireDeliveryAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requirePreviewForAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "planApprovalAgents",
+                        "holdAfterFailure",
+                        "requireDeliveryAcceptance",
+                        "requirePreviewForAcceptance"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "policy"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get workflow policy",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:read"
+      }
+    },
+    "/v1/projects/{projectId}/workflow-policy/review": {
+      "post": {
+        "operationId": "reviewProjectWorkflowPolicy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483646
+                  },
+                  "policy": {
+                    "type": "object",
+                    "properties": {
+                      "planApprovalAgents": {
+                        "default": [],
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "holdAfterFailure": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "requireDeliveryAcceptance": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "requirePreviewForAcceptance": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "expected_revision",
+                  "policy",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Must match idempotency_key in the request body. Reuse the same key when retrying that action.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "expectedRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483646
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "planApprovalAgents": {
+                          "default": [],
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "holdAfterFailure": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requireDeliveryAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requirePreviewForAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "planApprovalAgents",
+                        "holdAfterFailure",
+                        "requireDeliveryAcceptance",
+                        "requirePreviewForAcceptance"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    "proof": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{43}$"
+                    }
+                  },
+                  "required": [
+                    "expectedRevision",
+                    "policy",
+                    "nonce",
+                    "expiresAt",
+                    "proof"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create review",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
+      }
+    },
+    "/v1/projects/{projectId}/workflow-policy/confirm": {
+      "post": {
+        "operationId": "confirmProjectWorkflowPolicy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483646
+                  },
+                  "policy": {
+                    "type": "object",
+                    "properties": {
+                      "planApprovalAgents": {
+                        "default": [],
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "holdAfterFailure": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "requireDeliveryAcceptance": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "requirePreviewForAcceptance": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  },
+                  "proof": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "expected_revision",
+                  "policy",
+                  "nonce",
+                  "expires_at",
+                  "proof",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Must match idempotency_key in the request body. Reuse the same key when retrying that action.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483646
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "planApprovalAgents": {
+                          "default": [],
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "holdAfterFailure": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requireDeliveryAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "requirePreviewForAcceptance": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "planApprovalAgents",
+                        "holdAfterFailure",
+                        "requireDeliveryAcceptance",
+                        "requirePreviewForAcceptance"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "policy"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create confirm",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
+      }
+    },
+    "/v1/projects/{projectId}/workspace-stories/{storyId}/workflow": {
+      "get": {
+        "operationId": "getStoryWorkflow",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "storyId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "storyId": {
+                      "type": "string"
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "planApprovalAgents": {
+                              "default": [],
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              }
+                            },
+                            "holdAfterFailure": {
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "requireDeliveryAcceptance": {
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "requirePreviewForAcceptance": {
+                              "default": false,
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "planApprovalAgents",
+                            "holdAfterFailure",
+                            "requireDeliveryAcceptance",
+                            "requirePreviewForAcceptance"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "policy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "decisionRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "proposed",
+                            "approved",
+                            "rejected"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "decisionRevision",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "queuedAgents": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "blockedReason": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "acceptance": {
+                      "type": "object",
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "orgId": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "storyId": {
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "missing",
+                            "current",
+                            "stale"
+                          ]
+                        },
+                        "receipt": {
+                          "nullable": true,
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "requestId": {
+                              "type": "string"
+                            },
+                            "snapshot": {
+                              "type": "object",
+                              "properties": {
+                                "candidateRevision": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "scopeRevision": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483646
+                                },
+                                "planRevision": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483646
+                                },
+                                "planDigest": {
+                                  "nullable": true,
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "decisionRevision": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483646
+                                },
+                                "policyRevision": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483646
+                                },
+                                "acceptanceRevision": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2147483646
+                                },
+                                "previewGeneration": {
+                                  "nullable": true,
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "pullRequests": {
+                                  "minItems": 1,
+                                  "maxItems": 50,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "repository": {
+                                        "type": "string"
+                                      },
+                                      "number": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "exclusiveMinimum": true,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "headSha": {
+                                        "type": "string"
+                                      },
+                                      "url": {
+                                        "nullable": true,
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "repository",
+                                      "number",
+                                      "headSha",
+                                      "url"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "candidateRevision",
+                                "scopeRevision",
+                                "planRevision",
+                                "planDigest",
+                                "decisionRevision",
+                                "policyRevision",
+                                "acceptanceRevision",
+                                "previewGeneration",
+                                "pullRequests"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "confirmedBy": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "user"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "nullable": true,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "id",
+                                "name"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "confirmedAt": {
+                              "type": "string"
+                            },
+                            "method": {
+                              "type": "string",
+                              "enum": [
+                                "interactive_session"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision",
+                            "requestId",
+                            "snapshot",
+                            "confirmedBy",
+                            "confirmedAt",
+                            "method"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "schemaVersion",
+                        "orgId",
+                        "projectId",
+                        "storyId",
+                        "required",
+                        "status",
+                        "receipt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "orgId",
+                    "projectId",
+                    "storyId",
+                    "policy",
+                    "plan",
+                    "queuedAgents",
+                    "blockedReason",
+                    "acceptance"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get workflow",
+        "tags": [
+          "Stories"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:read"
+      }
+    },
+    "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance": {
+      "get": {
+        "operationId": "getStoryDeliveryAcceptance",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "storyId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "storyId": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "missing",
+                        "current",
+                        "stale"
+                      ]
+                    },
+                    "receipt": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "snapshot": {
+                          "type": "object",
+                          "properties": {
+                            "candidateRevision": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "scopeRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planDigest": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "decisionRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "policyRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "acceptanceRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "previewGeneration": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "pullRequests": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "repository": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "exclusiveMinimum": true,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "headSha": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "repository",
+                                  "number",
+                                  "headSha",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "candidateRevision",
+                            "scopeRevision",
+                            "planRevision",
+                            "planDigest",
+                            "decisionRevision",
+                            "policyRevision",
+                            "acceptanceRevision",
+                            "previewGeneration",
+                            "pullRequests"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "user"
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "nullable": true,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedAt": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "interactive_session"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision",
+                        "requestId",
+                        "snapshot",
+                        "confirmedBy",
+                        "confirmedAt",
+                        "method"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "orgId",
+                    "projectId",
+                    "storyId",
+                    "required",
+                    "status",
+                    "receipt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get delivery acceptance",
+        "tags": [
+          "Stories"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:read"
+      },
+      "post": {
+        "operationId": "requestStoryDeliveryAcceptance",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_candidate_revision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "expected_plan_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483646
+                  },
+                  "expected_decision_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483646
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "expected_candidate_revision",
+                  "expected_plan_revision",
+                  "expected_decision_revision",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "storyId",
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Must match idempotency_key in the request body. Reuse the same key when retrying that action.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "snapshot": {
+                      "type": "object",
+                      "properties": {
+                        "candidateRevision": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "scopeRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "planRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "planDigest": {
+                          "nullable": true,
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "decisionRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "policyRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "acceptanceRevision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "previewGeneration": {
+                          "nullable": true,
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "pullRequests": {
+                          "minItems": 1,
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repository": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true,
+                                "maximum": 9007199254740991
+                              },
+                              "headSha": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "nullable": true,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "repository",
+                              "number",
+                              "headSha",
+                              "url"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "candidateRevision",
+                        "scopeRevision",
+                        "planRevision",
+                        "planDigest",
+                        "decisionRevision",
+                        "policyRevision",
+                        "acceptanceRevision",
+                        "previewGeneration",
+                        "pullRequests"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "requestedBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "service"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "requestedAt": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "expired",
+                        "superseded"
+                      ]
+                    },
+                    "confirmationUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "snapshot",
+                    "requestedBy",
+                    "requestedAt",
+                    "expiresAt",
+                    "status",
+                    "confirmationUrl"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create delivery acceptance",
+        "tags": [
+          "Stories"
+        ],
+        "security": [
+          {
             "bearerAuth": []
           },
           {
@@ -14083,6 +15821,828 @@
           }
         ],
         "x-facility-permission": "projects:write"
+      }
+    },
+    "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance/{requestId}": {
+      "get": {
+        "operationId": "reviewStoryDeliveryAcceptance",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "storyId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "requestId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "storyId": {
+                      "type": "string"
+                    },
+                    "request": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "snapshot": {
+                          "type": "object",
+                          "properties": {
+                            "candidateRevision": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "scopeRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planDigest": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "decisionRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "policyRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "acceptanceRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "previewGeneration": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "pullRequests": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "repository": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "exclusiveMinimum": true,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "headSha": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "repository",
+                                  "number",
+                                  "headSha",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "candidateRevision",
+                            "scopeRevision",
+                            "planRevision",
+                            "planDigest",
+                            "decisionRevision",
+                            "policyRevision",
+                            "acceptanceRevision",
+                            "previewGeneration",
+                            "pullRequests"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "user",
+                                "service"
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "nullable": true,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "requestedAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "confirmed",
+                            "expired",
+                            "superseded"
+                          ]
+                        },
+                        "confirmationUrl": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "snapshot",
+                        "requestedBy",
+                        "requestedAt",
+                        "expiresAt",
+                        "status",
+                        "confirmationUrl"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proof": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "receipt": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "snapshot": {
+                          "type": "object",
+                          "properties": {
+                            "candidateRevision": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "scopeRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planDigest": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "decisionRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "policyRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "acceptanceRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "previewGeneration": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "pullRequests": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "repository": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "exclusiveMinimum": true,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "headSha": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "repository",
+                                  "number",
+                                  "headSha",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "candidateRevision",
+                            "scopeRevision",
+                            "planRevision",
+                            "planDigest",
+                            "decisionRevision",
+                            "policyRevision",
+                            "acceptanceRevision",
+                            "previewGeneration",
+                            "pullRequests"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "user"
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "nullable": true,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedAt": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "interactive_session"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision",
+                        "requestId",
+                        "snapshot",
+                        "confirmedBy",
+                        "confirmedAt",
+                        "method"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "orgId",
+                    "projectId",
+                    "storyId",
+                    "request",
+                    "proof",
+                    "receipt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get  requestId ",
+        "tags": [
+          "Stories"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
+      }
+    },
+    "/v1/projects/{projectId}/workspace-stories/{storyId}/delivery-acceptance/{requestId}/confirm": {
+      "post": {
+        "operationId": "confirmStoryDeliveryAcceptance",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "proof": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "proof",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "storyId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "requestId",
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Must match idempotency_key in the request body. Reuse the same key when retrying that action.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "storyId": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "missing",
+                        "current",
+                        "stale"
+                      ]
+                    },
+                    "receipt": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483646
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "snapshot": {
+                          "type": "object",
+                          "properties": {
+                            "candidateRevision": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "scopeRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "planDigest": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "decisionRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "policyRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "acceptanceRevision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483646
+                            },
+                            "previewGeneration": {
+                              "nullable": true,
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "pullRequests": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "repository": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "exclusiveMinimum": true,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "headSha": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "repository",
+                                  "number",
+                                  "headSha",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "candidateRevision",
+                            "scopeRevision",
+                            "planRevision",
+                            "planDigest",
+                            "decisionRevision",
+                            "policyRevision",
+                            "acceptanceRevision",
+                            "previewGeneration",
+                            "pullRequests"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "user"
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "nullable": true,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "confirmedAt": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "interactive_session"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision",
+                        "requestId",
+                        "snapshot",
+                        "confirmedBy",
+                        "confirmedAt",
+                        "method"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "orgId",
+                    "projectId",
+                    "storyId",
+                    "required",
+                    "status",
+                    "receipt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required or invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal lacks the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource was not found or is outside the principal scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with current resource state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create confirm",
+        "tags": [
+          "Stories"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-facility-permission": "projects:write",
+        "x-facility-interactive-confirmation": true
       }
     },
     "/v1/projects/{projectId}/workspace-stories/{storyId}/consultations/options": {
