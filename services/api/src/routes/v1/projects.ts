@@ -1,8 +1,14 @@
-import { can, newId } from "@facility/core";
+import {
+  can,
+  DeliveryIntegrationPolicySchema,
+  DeliveryNoticePolicySchema,
+  newId,
+} from "@facility/core";
 import { type FacilityDb, githubInstallations, projectRepositories, projects } from "@facility/db";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { requirePermissions } from "../../auth/required-permissions.js";
 import { ApiError, notFound } from "../../errors.js";
 import { createGithubClientFactory } from "../../github/client.js";
 import { DevelopmentBranchSchema } from "../../github/development-branch.js";
@@ -36,6 +42,8 @@ const ProjectSchema = z.object({
 
 const ProjectSettings = z
   .object({
+    deliveryIntegration: z.never().optional(),
+    deliveryNotices: z.never().optional(),
     nativePreviewsEnabled: z.boolean().optional(),
     developmentBranch: DevelopmentBranchSchema.nullable().optional(),
   })
@@ -141,6 +149,97 @@ export async function registerProjectRoutes(app: FastifyInstance, context: V1Rou
     },
     async (request) =>
       presentProject(await loadProject(db, principal(request).orgId, projectId(request))),
+  );
+
+  app.get(
+    "/v1/projects/:projectId/delivery-integration",
+    {
+      config: { permission: "projects:read" },
+      schema: {
+        params: IdParams,
+        response: { 200: DeliveryIntegrationPolicySchema },
+        operationId: "getProjectDeliveryIntegration",
+      },
+    },
+    async (request, reply) => {
+      const actor = principal(request);
+      reply.header("cache-control", "private, no-store");
+      return app.storyDomain.completion.getPolicy({
+        orgId: actor.orgId,
+        projectId: projectId(request),
+      });
+    },
+  );
+
+  app.patch(
+    "/v1/projects/:projectId/delivery-integration",
+    {
+      config: {
+        permission: ["projects:write", "repos:write"],
+        auditAction: "project.delivery_integration.updated",
+        idempotent: true,
+      },
+      schema: {
+        params: IdParams,
+        body: DeliveryIntegrationPolicySchema,
+        response: { 200: DeliveryIntegrationPolicySchema },
+        operationId: "updateProjectDeliveryIntegration",
+      },
+    },
+    async (request, reply) => {
+      const actor = principal(request);
+      requirePermissions(actor, ["projects:write", "repos:write"]);
+      reply.header("cache-control", "private, no-store");
+      return app.storyDomain.completion.setPolicy(
+        { orgId: actor.orgId, projectId: projectId(request) },
+        request.body as z.infer<typeof DeliveryIntegrationPolicySchema>,
+      );
+    },
+  );
+
+  app.get(
+    "/v1/projects/:projectId/delivery-notices",
+    {
+      config: { permission: "projects:read" },
+      schema: {
+        params: IdParams,
+        response: { 200: DeliveryNoticePolicySchema },
+        operationId: "getProjectDeliveryNotices",
+      },
+    },
+    async (request, reply) => {
+      const actor = principal(request);
+      reply.header("cache-control", "private, no-store");
+      return app.storyDomain.completion.getNoticePolicy({
+        orgId: actor.orgId,
+        projectId: projectId(request),
+      });
+    },
+  );
+
+  app.patch(
+    "/v1/projects/:projectId/delivery-notices",
+    {
+      config: {
+        permission: "projects:write",
+        auditAction: "project.delivery_notices.updated",
+        idempotent: true,
+      },
+      schema: {
+        params: IdParams,
+        body: DeliveryNoticePolicySchema,
+        response: { 200: DeliveryNoticePolicySchema },
+        operationId: "updateProjectDeliveryNotices",
+      },
+    },
+    async (request, reply) => {
+      const actor = principal(request);
+      reply.header("cache-control", "private, no-store");
+      return app.storyDomain.completion.setNoticePolicy(
+        { orgId: actor.orgId, projectId: projectId(request) },
+        request.body as z.infer<typeof DeliveryNoticePolicySchema>,
+      );
+    },
   );
 
   app.patch(
@@ -251,6 +350,18 @@ export async function registerProjectRoutes(app: FastifyInstance, context: V1Rou
             .set(
               definedFields({
                 ...fields,
+                ...(fields.settings === undefined
+                  ? {}
+                  : {
+                      settings: {
+                        ...fields.settings,
+                        ...Object.fromEntries(
+                          Object.entries(current.settings as Record<string, unknown>).filter(
+                            ([key]) => ["deliveryIntegration", "deliveryNotices"].includes(key),
+                          ),
+                        ),
+                      },
+                    }),
                 // The narrow UI update preserves unrelated settings, including concurrent writes.
                 ...(Object.keys(preferences).length === 0
                   ? {}

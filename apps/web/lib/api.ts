@@ -10,9 +10,11 @@ import type {
   FacilityRouteResponse,
   ProjectSkill,
   StoryAgent,
+  StoryConsultations,
   StoryConversationPage,
   StoryDelivery,
   StoryEnvironment,
+  StoryPreviewConvergence,
   StoryTimelinePage,
   StoryTurnActivityPage,
   StoryTurnEvent,
@@ -55,11 +57,13 @@ export type {
   StoryActivityItem,
   StoryAgent,
   StoryAssignee,
+  StoryCompletion,
   StoryConversationPage,
   StoryDelivery,
   StoryEnvironment,
   StoryMessage,
   StoryMessageAuthor,
+  StoryPreviewConvergence,
   StoryTimelineEntry,
   StoryTimelinePage,
   StoryTurnActivityPage,
@@ -169,6 +173,20 @@ export const api = {
       apiFetch(
         "GET",
         `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/delivery`,
+      ),
+    ),
+  workspaceStoryPreviewConvergence: (projectId: string, storyId: string) =>
+    typed<StoryPreviewConvergence | null>(
+      apiFetch(
+        "GET",
+        `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/preview-convergence`,
+      ),
+    ),
+  workspaceStoryConsultations: (projectId: string, storyId: string) =>
+    typed<StoryConsultations>(
+      apiFetch(
+        "GET",
+        `/v1/projects/${encodeURIComponent(projectId)}/workspace-stories/${encodeURIComponent(storyId)}/consultations`,
       ),
     ),
   reviewStoryPlanDecision: (projectId: string, storyId: string, requestId: string) =>
