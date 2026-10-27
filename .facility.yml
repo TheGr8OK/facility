@@ -1,0 +1,15 @@
+version: 1
+repositories:
+  primary: "github.com/TheGr8OK/facility"
+  related: []
+environment:
+  setup: "pnpm install --frozen-lockfile"
+  start: "(nohup pnpm --filter @facility/docs exec docusaurus start --port 3500 --host 0.0.0.0 --no-open > /tmp/facility-docs-dev.log 2>&1 &)"
+  ready: "curl --fail --silent http://127.0.0.1:3500/ >/dev/null"
+  secrets:
+    - CLAUDE_CODE_OAUTH_TOKEN
+  services:
+    app:
+      port: 3500
+      protocol: http
+      websocket: true
