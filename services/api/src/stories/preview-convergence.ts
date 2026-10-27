@@ -453,6 +453,33 @@ export class StoryPreviewConvergenceService {
     });
   }
 
+  /** Serialize compute binding with suspension so a revoked worker cannot wake fresh compute. */
+  async bindCompute<T>(
+    scope: PreviewConvergenceScope,
+    input: { generation: string; leaseToken: string },
+    bind: () => Promise<T>,
+    now = new Date(),
+  ) {
+    return this.db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as FacilityDb;
+      const [controller] = await tx
+        .select()
+        .from(storyPreviewConvergences)
+        .where(convergenceWhere(scope))
+        .for("update")
+        .limit(1);
+      if (
+        controller?.state !== "applying" ||
+        controller.leaseToken !== input.leaseToken ||
+        controller.leaseGeneration !== input.generation ||
+        !controller.leaseExpiresAt ||
+        controller.leaseExpiresAt <= now
+      )
+        return null;
+      return bind();
+    });
+  }
+
   async complete(
     scope: PreviewConvergenceScope,
     input: {

@@ -26,7 +26,8 @@ instance also attaches that volume.
 
 Suspending an active preview retires its compute incarnation before releasing the preview writer.
 Restore then attaches the retained volume to fresh compute, so delayed commands from the old
-preview cannot change files underneath the next agent. If the provider cannot confirm retirement,
+preview cannot change files underneath the next agent. Compute startup is serialized with this
+retirement, preventing a revoked attempt from waking fresh compute. If the provider cannot confirm retirement,
 the preview writer remains blocked; retry suspension after provider recovery. Conversation,
 application data, Git history, and native engine sessions remain retained.
 
