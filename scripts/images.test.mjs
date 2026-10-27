@@ -248,24 +248,12 @@ test("runner Go binaries resolve the fixed cryptography and gRPC modules", () =>
   );
 });
 
-test("all runner source builds select the patched compression module", () => {
-  for (const stage of [
-    "moby-build",
-    "docker-cli-build",
-    "containerd-build",
-    "rootlesskit-build",
-    "buildx-build",
-    "compose-build",
-    "runc-build",
-    "gh-build",
-  ]) {
-    const sourceBuild = runnerDockerfile.split(` AS ${stage}\n`)[1]?.split("\nFROM ")[0];
-    assert.match(
-      sourceBuild ?? "",
-      /go mod edit -replace=github\.com\/klauspost\/compress=github\.com\/klauspost\/compress@v1\.18\.7\s/,
-      `${stage} must rebuild against the patched compression module`,
-    );
-  }
+test("containerd rebuilds against patched compression without downgrading other tools", () => {
+  const sourceBuild = runnerDockerfile.split(" AS containerd-build\n")[1]?.split("\nFROM ")[0];
+  const replacement =
+    /go mod edit -replace=github\.com\/klauspost\/compress=github\.com\/klauspost\/compress@v1\.18\.7\s/g;
+  assert.match(sourceBuild ?? "", replacement);
+  assert.equal([...runnerDockerfile.matchAll(replacement)].length, 1);
 });
 
 test("compression audit validates effective embedded versions and fails closed on inspection errors", () => {
@@ -299,6 +287,10 @@ test("compression audit validates effective embedded versions and fails closed o
           malformed) printf 'dep github.com/klauspost/compress\\n'; return ;;
           error) return 1 ;;
           patched) printf 'dep github.com/klauspost/compress v1.18.7\\n'; return ;;
+          newer) printf 'dep github.com/klauspost/compress v1.19.1\\n'; return ;;
+          newer-replacement) printf 'dep github.com/klauspost/compress v1.18.5\\n=> github.com/klauspost/compress v1.19.1\\n'; return ;;
+          prerelease) printf 'dep github.com/klauspost/compress v1.18.7-beta\\n'; return ;;
+          unreviewed-major) printf 'dep github.com/klauspost/compress v2.0.0\\n'; return ;;
           absent) printf 'dep example.com/unrelated v1.18.5\\n'; return ;;
         esac
       fi
@@ -313,11 +305,19 @@ test("compression audit validates effective embedded versions and fails closed o
     });
   assert.equal(runAudit().status, 0);
   for (const binary of binaries) {
-    for (const variant of ["patched", "absent"]) {
+    for (const variant of ["patched", "newer", "newer-replacement", "absent"]) {
       const result = runAudit(binary, variant);
       assert.equal(result.status, 0, `${binary}: ${variant}: ${result.stderr}`);
     }
-    for (const variant of ["outdated", "stale-replacement", "substituted", "malformed", "error"]) {
+    for (const variant of [
+      "outdated",
+      "stale-replacement",
+      "substituted",
+      "malformed",
+      "prerelease",
+      "unreviewed-major",
+      "error",
+    ]) {
       const result = runAudit(binary, variant);
       assert.equal(result.status, 1, `${binary}: ${variant} must fail closed: ${result.stderr}`);
     }
