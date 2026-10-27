@@ -151,7 +151,16 @@ export class StoryPreviewConvergenceExecutor {
         await this.releaseWriter(scope);
         return { claimed: true as const, state: "recovered" as const };
       }
-      const compute = await this.runtime.wake(locator);
+      const target = locator;
+      const compute = await this.convergence.bindCompute(scope, claim, () =>
+        this.runtime.wake(target),
+      );
+      if (!compute)
+        throw new PreviewConvergenceError(
+          "preview_lease_lost",
+          "Preview compute binding lost its writer lease.",
+          false,
+        );
       const activeLocator = { ...locator, expectedComputeRef: compute.computeRef };
       locator = activeLocator;
       // A worker delayed before binding compute must not clean up a newer owner.
@@ -232,7 +241,8 @@ export class StoryPreviewConvergenceExecutor {
             generation: claim.generation,
             leaseToken: claim.leaseToken,
           });
-        if (locator && workspaceId) await this.honorSuspension(scope, locator, workspaceId);
+        if (locator?.expectedComputeRef && workspaceId)
+          await this.honorSuspension(scope, locator, workspaceId);
         await this.releaseWriter(scope);
         return { claimed: true as const, state: "superseded" as const };
       }

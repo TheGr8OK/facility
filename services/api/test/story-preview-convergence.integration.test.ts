@@ -524,6 +524,30 @@ describe("durable story preview convergence", () => {
     expect((await service.read(scope))?.state).toBe("applying");
   });
 
+  it("never binds a revoked or expired worker to restored compute", async () => {
+    const now = new Date();
+    const { scope } = await fixture(now);
+    const service = new StoryPreviewConvergenceService(
+      db,
+      async () => undefined,
+      1000,
+      async () => undefined,
+    );
+    await service.observe(scope, now);
+    const old = await service.claim(scope, now);
+    if (!old.claimed) throw new Error("Expected preview claim");
+    const wake = vi.fn(async () => "compute");
+    expect(await service.bindCompute(scope, old, wake, new Date(now.getTime() + 1001))).toBeNull();
+    await service.suspend(scope);
+    await service.resume(scope);
+    const current = await service.claim(scope);
+    if (!current.claimed) throw new Error("Expected restored preview claim");
+    expect(await service.bindCompute(scope, old, wake)).toBeNull();
+    expect(wake).not.toHaveBeenCalled();
+    expect(await service.bindCompute(scope, current, wake)).toBe("compute");
+    expect(wake).toHaveBeenCalledOnce();
+  });
+
   it("rejects expired success and failure even before another worker reclaims", async () => {
     const now = new Date();
     const { scope } = await fixture(now);
