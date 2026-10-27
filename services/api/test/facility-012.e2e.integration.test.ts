@@ -31,6 +31,11 @@ import { GithubMirrorService } from "../src/github/mirror.js";
 import { GithubWorkspaceCredentialBroker } from "../src/github/workspace-credentials.js";
 import { CostBudgetService } from "../src/insights/costs.js";
 import { ProjectBacklogService } from "../src/stories/backlog.js";
+import { StoryCompletionService } from "../src/stories/completion.js";
+import { GithubConsultationSources } from "../src/stories/consultation-sources.js";
+import { StoryConsultationService } from "../src/stories/consultations.js";
+import { StoryPreviewConvergenceService } from "../src/stories/preview-convergence.js";
+import { StoryPreviewConvergenceExecutor } from "../src/stories/preview-convergence-executor.js";
 import { StoryWorkspaceService } from "../src/stories/service.js";
 import { StoryTitleService } from "../src/stories/titles.js";
 import type { StoryDomain } from "../src/story-domain.js";
@@ -245,6 +250,15 @@ environment:
       projectManifests,
       environment,
     );
+    const previewConvergence = new StoryPreviewConvergenceService(db, async () => undefined);
+    const previewConvergenceExecutor = new StoryPreviewConvergenceExecutor(
+      db,
+      runtime,
+      credentials,
+      projectManifests,
+      environment,
+      previewConvergence,
+    );
     const domain: StoryDomain = {
       variables: new WorkspaceVariablesService(db, config.secretMasterKey),
       runtime,
@@ -274,6 +288,23 @@ environment:
         budget: new CostBudgetService(db),
       }),
       backlog: new ProjectBacklogService(db),
+      consultations: new StoryConsultationService(db, {
+        sources: new GithubConsultationSources(db, async () => {
+          throw new Error("Consultation sources are not used in this reference fixture");
+        }),
+        credentials: async () => undefined,
+        enqueue: async () => undefined,
+      }),
+      previewConvergence,
+      previewConvergenceExecutor,
+      completion: new StoryCompletionService(
+        db,
+        async () => {
+          throw new Error("Completion GitHub writes are not used by this fixture");
+        },
+        stories,
+        async () => undefined,
+      ),
     };
     app = await buildApp(config, {
       storyDomain: domain,
