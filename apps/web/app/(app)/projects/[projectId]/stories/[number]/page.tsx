@@ -6,10 +6,12 @@ import { LiveRefresh } from "@/components/shell/live-refresh";
 import { AttentionActions } from "@/components/story/attention-actions";
 import { EnvironmentLogs } from "@/components/story/environment-logs";
 import { StoryActions } from "@/components/story/story-actions";
+import { StoryCompletionPanel } from "@/components/story/story-completion";
 import { StoryConsultationPanel } from "@/components/story/story-consultation";
 import { StoryConversation } from "@/components/story/story-conversation";
 import { StoryDeliveryPanel } from "@/components/story/story-delivery";
 import { StoryPlanPanel } from "@/components/story/story-plan";
+import { StoryPreviewConvergencePanel } from "@/components/story/story-preview-convergence";
 import { StoryTimeline } from "@/components/story/story-timeline";
 import { WorkspaceVariables } from "@/components/story/workspace-variables";
 import { api, type StoryEnvironment } from "@/lib/api";
@@ -66,6 +68,9 @@ export default async function StoryPage({
   const permissions = me.ok ? me.data.permissions : [];
   const canExecute = can(permissions, "workspaces:execute");
   const canWrite = can(permissions, "projects:write");
+  const canConfigureIntegration = canWrite && can(permissions, "repos:write");
+  const canRecordIntegration = can(permissions, "stories:write");
+  const canComplete = canWrite && can(permissions, "github:write");
   const activeTurn =
     bundle.turns.find((turn) => turn.state === "running") ??
     bundle.turns.find((turn) => turn.state === "queued") ??
@@ -166,32 +171,39 @@ export default async function StoryPage({
           aria-label="Needs your attention"
         >
           <h2 className="mb-4 font-semibold">Needs your attention · {openAttention.length}</h2>
-          {openAttention.map((item) => (
-            <div key={item.id} className="border-t border-(--line) py-4">
-              <p className="font-medium">{item.title}</p>
-              <p className="mt-2 text-sm text-(--mut)">
-                {item.kind === "agent_waiting" ? item.detail : errorSummary(item.detail)}
-              </p>
-              {item.kind !== "agent_waiting" && item.detail ? (
-                <details className="mt-3 text-sm">
-                  <summary className="cursor-pointer">Technical details</summary>
-                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
-                    {item.detail}
-                  </pre>
-                </details>
-              ) : null}
-              {canExecute ? (
-                <AttentionActions
-                  projectId={projectId}
-                  storyId={story.id}
-                  item={item}
-                  agentName={
-                    bundle.turns.find((turn) => turn.id === item.turnId)?.agentName ?? null
-                  }
-                />
-              ) : null}
-            </div>
-          ))}
+          {openAttention.map((item) => {
+            const deliveryNotice = ["delivery_integration", "delivery_completion"].includes(
+              item.kind,
+            );
+            return (
+              <div key={item.id} className="border-t border-(--line) py-4">
+                <p className="font-medium">{item.title}</p>
+                <p className="mt-2 text-sm text-(--mut)">
+                  {item.kind === "agent_waiting" || deliveryNotice
+                    ? item.detail
+                    : errorSummary(item.detail)}
+                </p>
+                {item.kind !== "agent_waiting" && !deliveryNotice && item.detail ? (
+                  <details className="mt-3 text-sm">
+                    <summary className="cursor-pointer">Technical details</summary>
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">
+                      {item.detail}
+                    </pre>
+                  </details>
+                ) : null}
+                {canExecute ? (
+                  <AttentionActions
+                    projectId={projectId}
+                    storyId={story.id}
+                    item={item}
+                    agentName={
+                      bundle.turns.find((turn) => turn.id === item.turnId)?.agentName ?? null
+                    }
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </section>
       ) : null}
 
@@ -213,6 +225,24 @@ export default async function StoryPage({
         storyId={story.id}
         initial={bundle.delivery}
         canWrite={canWrite}
+        canExecute={canExecute}
+      />
+
+      <StoryPreviewConvergencePanel
+        projectId={projectId}
+        storyId={story.id}
+        initial={bundle.previewConvergence}
+        canExecute={canExecute && story.deletedAt === null}
+      />
+
+      <StoryCompletionPanel
+        projectId={projectId}
+        storyId={story.id}
+        initial={bundle.completion}
+        canConfigure={canConfigureIntegration}
+        canConfigureNotices={canWrite}
+        canRecord={canRecordIntegration}
+        canComplete={canComplete}
       />
 
       <StoryConsultationPanel

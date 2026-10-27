@@ -89,7 +89,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-async function render(initial: StoryDelivery | undefined = snapshot(), canWrite = true) {
+async function render(
+  initial: StoryDelivery | undefined = snapshot(),
+  canWrite = true,
+  canExecute = false,
+) {
   await act(async () =>
     root.render(
       <StoryDeliveryPanel
@@ -97,6 +101,7 @@ async function render(initial: StoryDelivery | undefined = snapshot(), canWrite 
         storyId="story-a"
         initial={initial}
         canWrite={canWrite}
+        canExecute={canExecute}
       />,
     ),
   );
@@ -129,6 +134,17 @@ function postCalls() {
 }
 
 describe("story delivery UI", () => {
+  it("discloses execution before an execution-capable user saves the PR set", async () => {
+    await render(snapshot(), true, true);
+    await click("Edit PR set");
+    expect(container.textContent).toContain("Saving also authorizes automatic preview updates");
+    expect(container.textContent).toContain("Your data is retained");
+    expect(button("Save PR set and update preview")).toBeDefined();
+    expect(postCalls()).toHaveLength(0);
+    await click("Save PR set and update preview");
+    expect(postCalls()).toHaveLength(1);
+  });
+
   it("shows all required PRs, partial merges and old-head CI to a reader without making requests", async () => {
     await render(snapshot(), false);
     expect(container.textContent).toContain("1 of 3 required PRs observed merged");

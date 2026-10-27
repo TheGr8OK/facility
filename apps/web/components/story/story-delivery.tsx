@@ -24,11 +24,13 @@ export function StoryDeliveryPanel({
   storyId,
   initial,
   canWrite,
+  canExecute = false,
 }: {
   projectId: string;
   storyId: string;
   initial?: StoryDelivery;
   canWrite: boolean;
+  canExecute?: boolean;
 }) {
   const router = useRouter();
   const radioName = useId();
@@ -483,8 +485,13 @@ export function StoryDeliveryPanel({
               limited to 50 PRs per story.
             </p>
             <div className="flex flex-wrap gap-3">
+              <p className="basis-full text-sm text-(--mut)">
+                {canExecute
+                  ? "Saving also authorizes automatic preview updates for this PR set. Facility may fetch commits, update managed workspace code and rebuild or restart the app. Your data is retained. This does not start an AI agent."
+                  : "Saving records the PR set. Updating the preview requires workspace execution permission."}
+              </p>
               <Button variant="primary" onClick={() => void save()}>
-                {saving ? "Saving…" : "Save PR set"}
+                {saving ? "Saving…" : canExecute ? "Save PR set and update preview" : "Save PR set"}
               </Button>
               <Button
                 onClick={() => {
