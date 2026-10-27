@@ -22,6 +22,7 @@ import { reconciliationPage } from "../reconciliation.js";
 import type { PreviewEndpoint } from "../workspaces/runtime.js";
 import { readStoryDelivery } from "./delivery.js";
 import { previewExecutionAuthorizer } from "./preview-execution.js";
+import { PreviewComputeStopError } from "./preview-lease.js";
 
 export type PreviewConvergenceScope = { orgId: string; projectId: string; storyId: string };
 export type PreviewConvergenceJob = PreviewConvergenceScope;
@@ -67,6 +68,7 @@ export class StoryPreviewConvergenceService {
     private readonly db: FacilityDb,
     private readonly enqueue: Enqueue,
     private readonly leaseMs = DEFAULT_LEASE_MS,
+    private readonly fenceWriter?: (scope: PreviewConvergenceScope) => Promise<void>,
   ) {}
 
   /** Explicit execution delegation for one reviewed delivery scope revision. */
@@ -700,6 +702,15 @@ export class StoryPreviewConvergenceService {
           return false;
       }
       if (controller.state === "applying" && controller.leaseToken) {
+        // Keep the durable writer until its compute incarnation is unreachable.
+        // A stop/start can reuse its identity while old command responses drain.
+        // Holding the row lock also fences workers still binding their compute.
+        try {
+          if (!this.fenceWriter) throw new Error("Preview writer fence is unavailable");
+          await this.fenceWriter(scope);
+        } catch (cause) {
+          throw new PreviewComputeStopError("Suspended preview compute was not retired", { cause });
+        }
         await tx
           .update(storyPreviewAttempts)
           .set({

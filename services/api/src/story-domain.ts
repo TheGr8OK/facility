@@ -16,7 +16,10 @@ import { StoryCompletionService } from "./stories/completion.js";
 import { GithubConsultationSources } from "./stories/consultation-sources.js";
 import { StoryConsultationService } from "./stories/consultations.js";
 import { StoryPreviewConvergenceService } from "./stories/preview-convergence.js";
-import { StoryPreviewConvergenceExecutor } from "./stories/preview-convergence-executor.js";
+import {
+  retirePreviewWriter,
+  StoryPreviewConvergenceExecutor,
+} from "./stories/preview-convergence-executor.js";
 import { StoryWorkspaceService } from "./stories/service.js";
 import { StoryTitleService, titleCredentials } from "./stories/titles.js";
 import { TurnDispatcher } from "./turns/dispatcher.js";
@@ -92,7 +95,12 @@ export function createStoryDomain(input: {
     undefined,
     (scope) => variables.values(scope),
   );
-  const previewConvergence = new StoryPreviewConvergenceService(input.db, input.enqueue);
+  const previewConvergence = new StoryPreviewConvergenceService(
+    input.db,
+    input.enqueue,
+    undefined,
+    (scope) => retirePreviewWriter(input.db, runtime, scope),
+  );
   const stories = new StoryWorkspaceService(
     input.db,
     runtime,

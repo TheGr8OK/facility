@@ -440,13 +440,15 @@ describe("durable story preview convergence", () => {
     const now = new Date();
     const { scope } = await fixture(now);
     const enqueue = vi.fn(async () => undefined);
-    const service = new StoryPreviewConvergenceService(db, enqueue);
+    const fence = vi.fn(async () => undefined);
+    const service = new StoryPreviewConvergenceService(db, enqueue, undefined, fence);
     await service.observe(scope, now);
     const claim = await service.claim(scope, now);
     if (!claim.claimed) throw new Error("Expected preview claim");
     await expect(service.suspend(scope, undefined, new Date(now.getTime() + 1))).resolves.toBe(
       true,
     );
+    expect(fence).toHaveBeenCalledExactlyOnceWith(scope);
     expect(await service.read(scope)).toMatchObject({
       state: "suspended",
       attempt: { state: "blocked", cause: { code: "preview_suspended" } },
@@ -460,6 +462,66 @@ describe("durable story preview convergence", () => {
     await expect(service.resume(scope, new Date(now.getTime() + 2))).resolves.toBe(true);
     expect((await service.read(scope))?.state).toBe("pending");
     expect(enqueue).toHaveBeenLastCalledWith("stories.preview-convergence", scope);
+  });
+
+  it("retains the writer while suspension fencing is pending or unconfirmed", async () => {
+    const { scope } = await fixture();
+    let entered!: () => void;
+    const fencing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let rejectFence!: (cause: Error) => void;
+    const pendingFence = new Promise<void>((_resolve, reject) => {
+      rejectFence = reject;
+    });
+    const fence = vi.fn(async () => {
+      entered();
+      await pendingFence;
+    });
+    const service = new StoryPreviewConvergenceService(db, async () => undefined, undefined, fence);
+    await service.observe(scope);
+    const claim = await service.claim(scope);
+    if (!claim.claimed) throw new Error("Expected preview claim");
+    const suspension = service.suspend(scope);
+    const rejected = expect(suspension).rejects.toMatchObject({
+      code: "preview_compute_stop_unconfirmed",
+    });
+    try {
+      await fencing;
+      expect((await service.read(scope))?.state).toBe("applying");
+      const storiesService = new StoryWorkspaceService(db, new FakeWorkspaceRuntime());
+      await db.insert(storyConversations).values({ ...scope, id: newId("sess") });
+      const queued = await storiesService.queueMessage({
+        ...scope,
+        agent: builder,
+        body: "Continue after suspension",
+        dedupeKey: randomUUID(),
+        actor: { type: "user", id: "user_local_admin" },
+        trigger: { type: "manual" },
+      });
+      expect(queued.turn).toBeUndefined();
+    } finally {
+      rejectFence(new Error("Provider unavailable"));
+      await rejected;
+    }
+    expect((await service.read(scope))?.state).toBe("applying");
+    expect(await service.resume(scope)).toBe(false);
+    expect(await service.retry(scope)).toBe(false);
+    expect(await service.renew(scope, claim)).not.toBeNull();
+    fence.mockImplementation(async () => undefined);
+    expect(await service.suspend(scope)).toBe(true);
+    expect((await service.read(scope))?.state).toBe("suspended");
+  });
+
+  it("refuses to release an active writer without a configured provider fence", async () => {
+    const { scope } = await fixture();
+    const service = new StoryPreviewConvergenceService(db, async () => undefined);
+    await service.observe(scope);
+    expect((await service.claim(scope)).claimed).toBe(true);
+    await expect(service.suspend(scope)).rejects.toMatchObject({
+      code: "preview_compute_stop_unconfirmed",
+    });
+    expect((await service.read(scope))?.state).toBe("applying");
   });
 
   it("rejects expired success and failure even before another worker reclaims", async () => {
