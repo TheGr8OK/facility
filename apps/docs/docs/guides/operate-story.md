@@ -183,6 +183,24 @@ until saved. Checkout refuses to overwrite ignored or untracked retained paths. 
 recovery preserve the volume and native sessions. Recovery retires abandoned compute and binds each attempt to its immutable provider identity, so delayed commands or stops cannot target a replacement. The next builder attaches to the converged revision, preserving the displaced branch under the retained refs. Dependency setup may rerun for new code; creation-only seed runs only on initial preparation or explicit clean setup.
 
 
+## Complete the source issue
+
+The completion panel separates the merged delivery, the configured post-merge integration and
+the source issue. Manual integration remains a human-recorded result. Repository dispatch waits
+for a result from the exact dispatched event. Completion requires both `projects:write` and
+`github:write`; changing integration policy requires both `projects:write` and `repos:write`.
+Ordinary project preferences preserve these policies.
+
+Repository-dispatch callbacks must set `event_id` to the `eventId` received in the
+`facility.delivery.merged` payload (`eventId` in MCP). A destination change or policy re-enable
+creates a new event. Identical terminal retries preserve the original receipt; conflicting
+terminal results are rejected. Manual integration uses a null event ID.
+
+Before the bounded GitHub close request, Facility rechecks the current candidate, integration,
+source binding and requesting principal. Delivery/policy mutations and local mirror updates are
+fenced through that request. A close response cannot replace a newer source observation, including a same-timestamp reopen. When the source changes, completion fails visibly and requires a fresh explicit request; automatic recovery cannot close it again. Closing an issue, suspending compute and retaining storage remain
+separate recorded results; this action does not merge PRs or delete persistent storage.
+
 ## Inspect and test the environment
 
 The environment view reports workspace state, provider inspection, setup and wake timing, events,

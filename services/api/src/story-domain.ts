@@ -12,6 +12,7 @@ import { GithubMirrorService } from "./github/mirror.js";
 import { GithubWorkspaceCredentialBroker } from "./github/workspace-credentials.js";
 import { CostBudgetService } from "./insights/costs.js";
 import { ProjectBacklogService } from "./stories/backlog.js";
+import { StoryCompletionService } from "./stories/completion.js";
 import { GithubConsultationSources } from "./stories/consultation-sources.js";
 import { StoryConsultationService } from "./stories/consultations.js";
 import { StoryPreviewConvergenceService } from "./stories/preview-convergence.js";
@@ -56,6 +57,7 @@ export type StoryDomain = {
   consultations: StoryConsultationService;
   previewConvergence: StoryPreviewConvergenceService;
   previewConvergenceExecutor: StoryPreviewConvergenceExecutor;
+  completion: StoryCompletionService;
   backlog: ProjectBacklogService;
 };
 
@@ -114,11 +116,15 @@ export function createStoryDomain(input: {
       onResume: (scope) => previewConvergence.resume(scope),
     },
   );
+  const completion = new StoryCompletionService(input.db, githubFactory, stories, input.enqueue);
   const mirror = new GithubMirrorService(
     input.db,
     githubFactory,
     stories,
-    (repositoryId, pullNumber) => previewConvergence.observePull(repositoryId, pullNumber),
+    async (repositoryId, pullNumber) => {
+      await previewConvergence.observePull(repositoryId, pullNumber);
+      await completion.observePull(repositoryId, pullNumber);
+    },
   );
   const engines = new AgentEngineRegistry([
     new ClaudeCodeEngine(runtime),
@@ -203,6 +209,7 @@ export function createStoryDomain(input: {
     consultations,
     previewConvergence,
     previewConvergenceExecutor,
+    completion,
     backlog,
   };
 }

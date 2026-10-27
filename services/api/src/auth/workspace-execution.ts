@@ -4,11 +4,12 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import { ApiError } from "../errors.js";
 
 /** Durable jobs re-read current authority; captured permission arrays never authorize an API call. */
-export async function authorizeWorkspaceExecution(
+export async function authorizePrincipal(
   db: FacilityDb,
   scope: { orgId: string; projectId: string },
   actor: { type: "user" | "key"; id: string },
-  errorCode = "workspace_execution_authorization_revoked",
+  required: readonly string[],
+  errorCode = "execution_authorization_revoked",
 ) {
   if (actor.type === "user") {
     const [row] = await db
@@ -26,7 +27,7 @@ export async function authorizeWorkspaceExecution(
       )
       .limit(1)
       .for("share");
-    if (row && can(row.grants, "workspaces:execute")) return;
+    if (row && required.every((permission) => can(row.grants, permission))) return;
   } else {
     const [row] = await db
       .select({ key: apiKeys, grants: roles.permissions })
@@ -44,7 +45,7 @@ export async function authorizeWorkspaceExecution(
       .for("share");
     if (
       row &&
-      can(row.grants, "workspaces:execute") &&
+      required.every((permission) => can(row.grants, permission)) &&
       ((row.key.scopeType === "project" && row.key.projectId === scope.projectId) ||
         (row.key.scopeType === "org" && row.key.projectId === null))
     )
@@ -53,6 +54,15 @@ export async function authorizeWorkspaceExecution(
   throw new ApiError(
     403,
     errorCode,
-    "The authorizer no longer has permission to execute this workspace",
+    "The authorizer no longer has permission to perform this action",
   );
+}
+
+export async function authorizeWorkspaceExecution(
+  db: FacilityDb,
+  scope: { orgId: string; projectId: string },
+  actor: { type: "user" | "key"; id: string },
+  errorCode = "workspace_execution_authorization_revoked",
+) {
+  return authorizePrincipal(db, scope, actor, ["workspaces:execute"], errorCode);
 }
