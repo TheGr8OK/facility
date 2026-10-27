@@ -21,6 +21,10 @@ The image contains:
 Go-based container and GitHub tools are rebuilt from checksum-pinned source and
 audited during the image build. Base image and package changes must preserve
 that executable supply-chain check rather than bypassing it.
+The containerd source build pins `github.com/klauspost/compress` to `v1.18.7`
+for GHSA-259r-337f-4rfw; other tools retain their newer reviewed dependencies.
+The build checks the effective embedded module, including Go replacements,
+in every copied Go binary and rejects versions below that floor or substituted copies.
 
 ## Persistent layout
 
