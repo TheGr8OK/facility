@@ -1,21 +1,8 @@
-import {
-  ConsultationSchema,
-  ConsultationSource,
-  can,
-  type StoryConsultation,
-} from "@facility/core";
-import {
-  apiKeys,
-  type FacilityDb,
-  modelCalls,
-  orgMembers,
-  roles,
-  stories,
-  storyConsultations,
-  users,
-} from "@facility/db";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { ConsultationSchema, ConsultationSource, type StoryConsultation } from "@facility/core";
+import { type FacilityDb, modelCalls, stories, storyConsultations } from "@facility/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { authorizeWorkspaceExecution } from "../auth/workspace-execution.js";
 import { ApiError } from "../errors.js";
 import type { ConsultationScope } from "./consultation-sources.js";
 import { readConsultationTaskState } from "./consultation-task-state.js";
@@ -54,57 +41,12 @@ export async function consultationStoryLock(db: FacilityDb, scope: ConsultationS
   );
 }
 
-/** Durable jobs re-read current authority; captured permission arrays never authorize an API call. */
 export async function authorizeConsultation(
   db: FacilityDb,
   scope: ConsultationScope,
   actor: Pick<ConsultationActor, "type" | "id">,
 ) {
-  if (actor.type === "user") {
-    const [row] = await db
-      .select({ grants: roles.permissions })
-      .from(orgMembers)
-      .innerJoin(users, eq(users.id, orgMembers.userId))
-      .innerJoin(roles, eq(roles.id, orgMembers.roleId))
-      .where(
-        and(
-          eq(orgMembers.orgId, scope.orgId),
-          eq(users.id, actor.id),
-          eq(users.status, "active"),
-          or(isNull(roles.orgId), eq(roles.orgId, scope.orgId)),
-        ),
-      )
-      .limit(1)
-      .for("share");
-    if (row && can(row.grants, "workspaces:execute")) return;
-  } else {
-    const [row] = await db
-      .select({ key: apiKeys, grants: roles.permissions })
-      .from(apiKeys)
-      .innerJoin(roles, eq(roles.id, apiKeys.roleId))
-      .where(
-        and(
-          eq(apiKeys.orgId, scope.orgId),
-          eq(apiKeys.id, actor.id),
-          isNull(apiKeys.revokedAt),
-          or(isNull(roles.orgId), eq(roles.orgId, scope.orgId)),
-        ),
-      )
-      .limit(1)
-      .for("share");
-    if (
-      row &&
-      can(row.grants, "workspaces:execute") &&
-      ((row.key.scopeType === "project" && row.key.projectId === scope.projectId) ||
-        (row.key.scopeType === "org" && row.key.projectId === null))
-    )
-      return;
-  }
-  throw new ApiError(
-    403,
-    "consultation_authorization_revoked",
-    "The requester no longer has permission to run this consultation",
-  );
+  return authorizeWorkspaceExecution(db, scope, actor, "consultation_authorization_revoked");
 }
 
 export function consultationContext(row: ConsultationRow): StoryConsultation["context"] {

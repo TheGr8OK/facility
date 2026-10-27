@@ -42,6 +42,9 @@ export async function startWorker() {
     "agent.schedules",
     "stories.title",
     "stories.consultation",
+    "stories.preview-convergence",
+    "stories.delivery-integration",
+    "stories.complete",
     "stories.integrations",
   ];
   for (const queue of queues) {
@@ -60,6 +63,11 @@ export async function startWorker() {
     retryDelay: 15,
     retryBackoff: true,
   });
+  await boss.updateQueue("stories.delivery-integration", {
+    name: "stories.delivery-integration",
+    retryLimit: 0,
+  });
+  await boss.updateQueue("stories.complete", { name: "stories.complete", retryLimit: 0 });
   const interruptedAtStartup = await recoverInterruptedTurns(
     db,
     storyDomain.stories,
@@ -72,6 +80,10 @@ export async function startWorker() {
   await recoverPendingConsultations(storyDomain.consultations, (queue, data) =>
     boss.send(queue, data),
   );
+  const observedPreviewsAtStartup = await storyDomain.previewConvergence.reconcileObserved();
+  const previewLifecycleAtStartup = await storyDomain.previewConvergence.reconcileLifecycle();
+  const recoveredPreviewsAtStartup = await storyDomain.previewConvergence.recover();
+  const recoveredCompletionAtStartup = await storyDomain.completion.recover();
   if (interruptedAtStartup > 0 || queuedAtStartup > 0) {
     logger.info(
       { interruptedTurns: interruptedAtStartup, queuedTurns: queuedAtStartup },
@@ -152,6 +164,20 @@ export async function startWorker() {
           );
           throw new Error("consultation_settlement_failed");
         }
+      } else if (queue === "stories.preview-convergence") {
+        result = await turnGuard.run(() =>
+          storyDomain.previewConvergenceExecutor.dispatch(
+            data as { orgId: string; projectId: string; storyId: string },
+          ),
+        );
+      } else if (queue === "stories.delivery-integration") {
+        result = await storyDomain.completion.dispatchIntegration(
+          data as { orgId: string; projectId: string; storyId: string },
+        );
+      } else if (queue === "stories.complete") {
+        result = await storyDomain.completion.dispatchCompletion(
+          data as { orgId: string; projectId: string; storyId: string },
+        );
       } else if (queue === "stories.title") {
         const outcome = await storyDomain.titles.generate(
           data as { orgId: string; projectId: string; storyId: string },
@@ -180,6 +206,10 @@ export async function startWorker() {
         const pendingTitles = await recoverPendingTitles(storyDomain.titles, (name, payload) =>
           boss.send(name, payload),
         );
+        const observedPreviews = await storyDomain.previewConvergence.reconcileObserved();
+        const previewLifecycle = await storyDomain.previewConvergence.reconcileLifecycle();
+        const recoveredPreviews = await storyDomain.previewConvergence.recover();
+        const recoveredCompletion = await storyDomain.completion.recover();
         result = {
           ...(await storyDomain.scheduler.tick()),
           interruptedTurns,
@@ -188,6 +218,10 @@ export async function startWorker() {
           pendingTitles,
           recoveredConsultations,
           pendingConsultations,
+          observedPreviews,
+          previewLifecycle,
+          recoveredPreviews,
+          recoveredCompletion,
         };
       }
       logger.info({ queue, jobId, ...result }, "worker completed job");
@@ -196,7 +230,16 @@ export async function startWorker() {
   await boss.schedule("agent.schedules", "* * * * *", {});
   await boss.schedule("github.mirror", "*/10 * * * *", {});
   await boss.schedule("stories.integrations", "* * * * *", {});
-  logger.info({ queues }, "facility worker started");
+  logger.info(
+    {
+      queues,
+      observedPreviewsAtStartup,
+      previewLifecycleAtStartup,
+      recoveredPreviewsAtStartup,
+      recoveredCompletionAtStartup,
+    },
+    "facility worker started",
+  );
   boss.on("stopped", () => void client.end());
   return {
     stop: () => {
