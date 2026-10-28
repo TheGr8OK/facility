@@ -98,6 +98,10 @@ describe("@facility/mcp 0.12", () => {
       "facility_request_story_completion",
       "facility_get_preview_convergence",
       "facility_retry_preview_convergence",
+      "facility_get_workflow_policy",
+      "facility_get_story_workflow",
+      "facility_get_delivery_acceptance",
+      "facility_request_delivery_acceptance",
       "facility_get_plan",
       "facility_propose_plan",
       "facility_request_plan_decision",
@@ -550,6 +554,60 @@ describe("@facility/mcp 0.12", () => {
       idempotentHint: true,
       openWorldHint: true,
     });
+    await client.close();
+    await server.close();
+  });
+
+  test("shares workflow and acceptance reads while exposing only a request for human acceptance", async () => {
+    const requests: Array<{ method: string; path: string; options: unknown }> = [];
+    const { client, server } = await connect({
+      request: async (method, path, options) => {
+        requests.push({ method, path, options });
+        return { status: "missing" };
+      },
+    });
+    const scope = { projectId: "proj_1", storyId: "story/1" };
+    for (const name of [
+      "facility_get_workflow_policy",
+      "facility_get_story_workflow",
+      "facility_get_delivery_acceptance",
+    ])
+      expect((await client.callTool({ name, arguments: scope })).isError).not.toBe(true);
+    expect(requests.map((item) => item.path)).toEqual([
+      "/v1/projects/proj_1/workflow-policy",
+      "/v1/projects/proj_1/workspace-stories/story%2F1/workflow",
+      "/v1/projects/proj_1/workspace-stories/story%2F1/delivery-acceptance",
+    ]);
+    expect(
+      (
+        await client.callTool({
+          name: "facility_request_delivery_acceptance",
+          arguments: {
+            ...scope,
+            candidateRevision: "a".repeat(64),
+            expectedPlanRevision: 2,
+            expectedDecisionRevision: 3,
+            idempotencyKey: "acceptance-retry-key",
+          },
+        })
+      ).isError,
+    ).not.toBe(true);
+    expect(requests[3]).toMatchObject({
+      method: "POST",
+      options: {
+        body: {
+          expected_candidate_revision: "a".repeat(64),
+          expected_plan_revision: 2,
+          expected_decision_revision: 3,
+          idempotency_key: "acceptance-retry-key",
+        },
+        idempotencyKey: "acceptance-retry-key",
+      },
+    });
+    const tools = await client.listTools();
+    expect(tools.tools.map((tool) => tool.name).join(" ")).not.toMatch(
+      /confirm.*accept|confirm.*policy/,
+    );
     await client.close();
     await server.close();
   });

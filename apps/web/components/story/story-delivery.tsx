@@ -161,6 +161,7 @@ export function StoryDeliveryPanel({
 
   return (
     <section
+      id="story-delivery"
       aria-label="Delivery pull requests"
       className="min-w-0 border border-(--line) p-5 lg:p-6"
     >

@@ -114,6 +114,13 @@ Agent manifests cannot define a custom permission set. Reviewers and scheduled a
 same capability as builders. Their prompts define behavior, while GitHub branch protection,
 required reviews, and CI remain structural controls for merge.
 
+Optional project workflow policies gate native turns on a current approved plan with exact agent
+configuration and full connected repository scope. These are admission gates, not per-command
+permissions: agents retain the same native capabilities once admitted. Policy configuration and
+final delivery acceptance require interactive, session-bound confirmations with current authority;
+MCP can request a human review link but cannot confirm one. Completion rechecks required acceptance
+at its protected source-close boundary. Existing projects remain ungated until configured.
+
 Facility does not use per-command receipts or approvals. It also does not merge a pull request as a
 side effect of marking a story done. Configure protected branches so an installation token cannot
 silently bypass the review policy you expect.

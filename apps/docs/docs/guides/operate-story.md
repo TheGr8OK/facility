@@ -140,8 +140,52 @@ the same retry key. Open **Plan and decision history** to inspect earlier revisi
 
 Decision requests from MCP return the same interactive review link. Open it with an authorized
 Facility browser session before its 15-minute expiry. A service key or OAuth token alone does not
-confirm it. Confirmation records the session's user and server time. It does not start agents,
-enforce an execution gate, approve a GitHub review or accept the delivered result.
+confirm it. Confirmation records the session's user and server time. Under the project's workflow
+policy, an approval can immediately release queued agents whose exact configuration and full
+repository scope match the plan. It does not approve a GitHub review or accept final delivery.
+
+### Require approval before execution
+
+In **Project settings → workflow approvals**, choose the configured agents that need an approved
+plan. Review the settings, then confirm them in your Facility browser session. Configuration needs
+both project and repository write access; an API key or OAuth bearer token cannot confirm it.
+Existing projects retain their prior behavior until a policy is explicitly enabled.
+
+The common native admission boundary checks the current approved plan before reserving budget
+or starting native execution. A new story cannot create or wake a builder workspace without its
+required approval; start with an ungated analyst or propose the plan on an existing story first.
+All native agents retain access to every connected project repository, so an execution-approved
+plan must include the full current project repository set and exact selected agent configuration.
+This policy does not create per-agent tool permissions or verify semantic code-to-plan alignment.
+
+Held messages stay queued with a visible reason. A new approval can release them; the durable
+worker recovery sweep retries if queue publication is unavailable. New plans, rejected decisions,
+changed agent/repository scope or revoked authority invalidate the old execution authorization.
+Running turns recheck it through their heartbeat. Optionally require a new plan approval after
+failed or canceled work before the next agent can proceed. Policy changes wait for running native
+turns to finish or be canceled, and explicitly disclose their effect on queued work.
+
+Enable policies only after API, worker, MCP and web have all completed the coordinated upgrade.
+An older worker does not implement the new admission gate.
+
+### Accept the exact final delivery
+
+The story's **approvals and acceptance** panel separates plan approval from final delivery
+acceptance. Declare the complete required PR set and refresh its heads, then choose **Request
+delivery acceptance**. Open the returned review link, inspect every required PR and exact head,
+and explicitly choose **Accept this exact delivery**. The request expires after 15 minutes.
+MCP can request that same link and read its status; it cannot confirm acceptance for a person.
+
+The receipt binds the candidate, PR-set scope, plan and decision revisions, and project policy.
+Concurrent confirmations create one current receipt. New heads or scope/plan/policy changes make
+earlier acceptance historical; they do not delete it. Revoked acceptor authority also prevents
+using the receipt for completion. When configured, a ready preview must match this exact candidate
+at request and confirmation. Suspending retained compute afterwards preserves an otherwise
+current acceptance. This is an interactive review record, not proof that a person opened a preview.
+
+When acceptance is required, the server checks it both when completion is requested and again at
+the worker's protected source-issue close boundary. Acceptance itself does not merge PRs, deploy
+software, close an issue or delete storage.
 
 ## Review the complete PR set
 

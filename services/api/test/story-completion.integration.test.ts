@@ -26,6 +26,11 @@ import { buildApp } from "../src/app.js";
 import type { GithubClientFactory, Octokit } from "../src/github/client.js";
 import { StoryCompletionService } from "../src/stories/completion.js";
 import { replaceStoryDelivery } from "../src/stories/delivery.js";
+import {
+  confirmDeliveryAcceptance,
+  requestDeliveryAcceptance,
+  reviewDeliveryAcceptance,
+} from "../src/stories/delivery-acceptance.js";
 import { createStoryDomain } from "../src/story-domain.js";
 import type { AppConfig } from "../src/types.js";
 import { FakeWorkspaceRuntime } from "../src/workspaces/fake.js";
@@ -916,6 +921,119 @@ describe("durable delivery integration, notices and source completion", () => {
     );
     expect(duplicate.integration.recordedAt).toBe(receipt.recordedAt);
     expect(duplicate.integration.recordedBy).toEqual(receipt.recordedBy);
+  });
+
+  async function enableAcceptance(project: string, revision = 1) {
+    await db
+      .update(projects)
+      .set({
+        settings: sql`${projects.settings} || ${JSON.stringify({
+          storyWorkflow: {
+            revision,
+            policy: {
+              planApprovalAgents: [],
+              holdAfterFailure: false,
+              requireDeliveryAcceptance: true,
+              requirePreviewForAcceptance: false,
+            },
+          },
+        })}::jsonb`,
+      })
+      .where(eq(projects.id, project));
+  }
+  async function acceptFixture(f: Awaited<ReturnType<typeof reviewFixture>>) {
+    // HTTP cookie/principal enforcement is covered by story-workflow.integration;
+    // this fixture exercises the same scoped domain confirmation and receipt.
+    const human = {
+      id: "user_local_admin",
+      name: "Fixture reviewer",
+      sessionCookie: "synthetic-local-session",
+    };
+    const pending = await requestDeliveryAcceptance(
+      db,
+      f.scope,
+      {
+        expected_candidate_revision: f.revision,
+        expected_plan_revision: 0,
+        expected_decision_revision: 0,
+        idempotency_key: randomUUID(),
+      },
+      { type: "user", id: human.id, name: human.name },
+      "https://facility.test",
+    );
+    const reviewed = await reviewDeliveryAcceptance(
+      db,
+      f.scope,
+      pending.id,
+      human,
+      config.secretMasterKey,
+      "https://facility.test",
+    );
+    if (!reviewed.proof) throw Error("Expected a current acceptance proof");
+    const receipt = await confirmDeliveryAcceptance(
+      db,
+      f.scope,
+      pending.id,
+      reviewed.proof,
+      human,
+      config.secretMasterKey,
+    );
+    expect(receipt.status).toBe("current");
+  }
+  it("blocks completion without required acceptance and permits the exact accepted candidate", async () => {
+    const f = await reviewFixture();
+    await enableAcceptance(f.scope.projectId);
+    const request = vi.fn(async () => ({ data: { number: 99, state: "closed" } }));
+    const service = new StoryCompletionService(
+      db,
+      async () => ({ request, rest: {} }) as unknown as Octokit,
+      domain.stories,
+      enqueue,
+    );
+    await expect(
+      service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" }),
+    ).rejects.toMatchObject({ code: "workflow_delivery_acceptance_required" });
+    expect(request).not.toHaveBeenCalled();
+    await acceptFixture(f);
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    expect(await service.dispatchCompletion(f.scope)).toMatchObject({
+      claimed: true,
+      state: "completed",
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks acceptance under the protected close boundary after GitHub client acquisition", async () => {
+    const f = await reviewFixture();
+    await enableAcceptance(f.scope.projectId);
+    await acceptFixture(f);
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const request = vi.fn(async () => ({ data: { number: 99, state: "closed" } }));
+    const service = new StoryCompletionService(
+      db,
+      async () => {
+        entered();
+        await gate;
+        return { request, rest: {} } as unknown as Octokit;
+      },
+      domain.stories,
+      enqueue,
+    );
+    await service.requestCompletion(f.scope, f.request, { type: "user", id: "user_local_admin" });
+    const running = service.dispatchCompletion(f.scope);
+    await waiting;
+    await enableAcceptance(f.scope.projectId, 2);
+    release();
+    expect(await running).toMatchObject({ claimed: true, state: "failed" });
+    expect(request).not.toHaveBeenCalled();
+    expect(
+      (await db.select().from(githubIssues).where(eq(githubIssues.id, f.issueId)))[0]?.state,
+    ).toBe("open");
   });
 
   it("rechecks the candidate after client acquisition before closing the source", async () => {

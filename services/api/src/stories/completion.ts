@@ -32,6 +32,7 @@ import type { GithubClientFactory } from "../github/client.js";
 import { githubRateLimitRetryAt } from "../github/rate-limit.js";
 import { reconciliationPage } from "../reconciliation.js";
 import { readStoryDelivery } from "./delivery.js";
+import { assertDeliveryAccepted } from "./delivery-acceptance.js";
 import type { StoryWorkspaceService } from "./service.js";
 
 type Scope = { orgId: string; projectId: string; storyId: string };
@@ -1162,6 +1163,7 @@ export class StoryCompletionService {
   }
 
   private async assertCompletionGate(scope: Scope, current: StoryCompletion) {
+    await assertDeliveryAccepted(this.db, scope);
     if (current.candidate.state !== "recorded" || current.candidate.allRequiredMerged !== true)
       throw new ApiError(
         409,

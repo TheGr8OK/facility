@@ -38,6 +38,8 @@ import type {
 } from "../workspaces/runtime.js";
 import { reconcileTurnBranch } from "./branch.js";
 import { isGithubIssueStory } from "./phase.js";
+import { authorizePlanExecution } from "./workflow-execution.js";
+import { lockWorkflowExecution, lockWorkflowProject } from "./workflow-policy.js";
 
 export type StoryActor = { type: "user" | "service" | "system"; id: string };
 
@@ -134,6 +136,7 @@ export class StoryWorkspaceService {
     validateStartInput(input);
     const aggregate = await this.db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as FacilityDb;
+      await lockWorkflowProject(tx, input);
       await lockIdentity(
         tx,
         `${input.orgId}:${input.projectId}:${input.repositoryId ?? "none"}:${input.provider}:${input.externalId}`,
@@ -183,6 +186,17 @@ export class StoryWorkspaceService {
           "this story's workspace was explicitly deleted; start a new story identity",
         );
       }
+      await lockWorkflowExecution(
+        tx,
+        { orgId: input.orgId, projectId: input.projectId, storyId: story.id },
+        input.agent.name,
+      );
+      await authorizePlanExecution(
+        tx,
+        { orgId: input.orgId, projectId: input.projectId, storyId: story.id },
+        input.agent,
+        input.actor,
+      );
       await recordParticipation(tx, story, input.actor);
 
       let conversation = (

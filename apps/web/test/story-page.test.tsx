@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { StoryWorkflowStatus } from "@facility/sdk";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import StoryPage from "../app/(app)/projects/[projectId]/stories/[number]/page";
@@ -44,6 +45,37 @@ vi.mock("../lib/api", async () => {
         record("environment", { ok: true, data: mocks.environment }),
       workspaceStoryConsultations: async () =>
         record("consultations", { ok: true, data: { items: [], total: 0, limit: 10, offset: 0 } }),
+      storyWorkflow: async () =>
+        record("workflow", {
+          ok: true,
+          data: {
+            schemaVersion: 1,
+            orgId: "org",
+            projectId: "project",
+            storyId: "story",
+            policy: {
+              revision: 0,
+              policy: {
+                planApprovalAgents: [],
+                holdAfterFailure: false,
+                requireDeliveryAcceptance: false,
+                requirePreviewForAcceptance: false,
+              },
+            },
+            plan: { revision: 0, decisionRevision: 0, status: "none" },
+            queuedAgents: [],
+            blockedReason: null,
+            acceptance: {
+              schemaVersion: 1,
+              orgId: "org",
+              projectId: "project",
+              storyId: "story",
+              required: false,
+              status: "missing",
+              receipt: null,
+            },
+          } satisfies StoryWorkflowStatus,
+        }),
       workspaceStoryActivity: async () => record("activity", unexpected),
       workspaceStoryTimeline: async () => record("timeline", unexpected),
       workspaceStoryTurnEvent: async () => record("event", unexpected),
@@ -280,8 +312,17 @@ describe("story overview integration", () => {
     expect(root.textContent).toContain("Suspended");
     expect(root.textContent).toContain("In review");
     expect(root.querySelector('[aria-label="Needs your attention"]')).toBeNull();
-    // Initial reads include saved consultation history; no options, inference or workspace wake.
-    expect(mocks.calls.sort()).toEqual(["consultations", "conversation", "environment", "story"]);
+    // Saved workflow and consultation reads start no inference or workspace wake.
+    expect(mocks.calls.sort()).toEqual([
+      "consultations",
+      "conversation",
+      "environment",
+      "story",
+      "workflow",
+    ]);
+    expect(root.querySelector('[aria-label="Workflow status"]')?.textContent).toContain(
+      "optional for this project",
+    );
     expect(root.querySelector("#consultation")?.textContent).toContain("No consultations saved");
 
     const history = [...root.querySelectorAll("details")].find((d) =>
@@ -316,7 +357,9 @@ describe("story overview integration", () => {
     expect(
       root.querySelector('a[href="https://github.com/acme/app/pull/42"]')?.textContent,
     ).toContain("pull request #42");
-    expect(root.querySelector('a[href^="#"]')).toBeNull();
+    for (const link of root.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
+      expect(root.querySelector(link.getAttribute("href") ?? "")).not.toBeNull();
+    }
     expect(root.textContent).not.toContain("suspend compute");
     expect(root.textContent).not.toContain("send a task");
     expect(root.textContent).not.toContain("open app");
