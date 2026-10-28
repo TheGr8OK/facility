@@ -64,6 +64,13 @@ The all-severity audit remains part of `pnpm verify`; the refresh does not add
 audit exceptions or change existing exceptions. For deployment and verification,
 see [release and dependency controls](hardening.md#release-and-dependency-controls).
 
+The docs SVG optimizer `@svgr/plugin-svgo` 8.1.0 declares an unused `deepmerge`
+dependency affected by GHSA-gcqx-w48m-w2h4. A version-scoped override removes
+that dependency edge rather than ignoring the advisory. Installed-consumer
+tests compile and render an SVG through the actual docs webpack loader, verify
+custom optimization options and reject malformed input. Reassess the override
+when updating SVGR; the all-severity audit remains unchanged.
+
 ## Workspace isolation
 
 Each story has separate provider compute, network context, and durable storage. Docker projects run
