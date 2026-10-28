@@ -26,6 +26,11 @@ for GHSA-259r-337f-4rfw; other tools retain their newer reviewed dependencies.
 The build checks the effective embedded module, including Go replacements,
 in every copied Go binary and rejects versions below that floor or substituted copies.
 
+Docker CLI and containerd also replace `github.com/go-jose/go-jose/v4` with
+`v4.1.6` for [GHSA-mgcc-cww5-fp2q](https://github.com/advisories/GHSA-mgcc-cww5-fp2q).
+The same final-binary inspection rejects affected effective JOSE versions,
+substituted modules and metadata inspection failures across the copied toolchain.
+
 ## Persistent layout
 
 The working directory is `/workspace`. Facility checks repositories out beneath

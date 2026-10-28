@@ -62,6 +62,7 @@ RUN archive=/tmp/docker-cli.tar.gz \
   # Docker CLI keeps its reviewed module graph in vendor.mod/vendor.sum. \
   && cp vendor.mod go.mod \
   && cp vendor.sum go.sum \
+  && go mod edit -replace=github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
@@ -85,6 +86,7 @@ RUN archive=/tmp/containerd.tar.gz \
   && tar -xzf "$archive" --strip-components=1 -C /src \
   && cd /src \
   && go mod edit -replace=github.com/klauspost/compress=github.com/klauspost/compress@v1.18.7 \
+  && go mod edit -replace=github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v4.1.6 \
   && go mod edit -replace=golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.60.0 \
   && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
@@ -218,6 +220,14 @@ RUN for binary in /out/*; do \
       '$1 == "dep" { pending = ($2 == "github.com/klauspost/compress"); if (pending) { found = 1; version = $3 }; next } \
        pending && $1 == "=>" { if ($2 != "github.com/klauspost/compress") { bad = 1; exit }; version = $3; pending = 0 } \
        function patched(value, parts) { if (value !~ /^v1\.[0-9]+\.[0-9]+$/) return 0; split(substr(value, 2), parts, "."); return parts[2] > 18 || (parts[2] == 18 && parts[3] >= 7) } \
+       END { exit (bad || (found && !patched(version))) }' || exit 1; \
+  done \
+  && for binary in /out/*; do \
+    metadata="$(go version -m "$binary")" || exit 1; \
+    printf '%s\n' "$metadata" | awk \
+      '$1 == "dep" { pending = ($2 == "github.com/go-jose/go-jose/v4"); if (pending) { found = 1; version = $3 }; next } \
+       pending && $1 == "=>" { if ($2 != "github.com/go-jose/go-jose/v4") { bad = 1; exit }; version = $3; pending = 0 } \
+       function patched(value, parts) { if (value !~ /^v4\.[0-9]+\.[0-9]+$/) return 0; split(substr(value, 2), parts, "."); return parts[2] > 1 || (parts[2] == 1 && parts[3] >= 6) } \
        END { exit (bad || (found && !patched(version))) }' || exit 1; \
   done \
   && for binary in /out/containerd /out/containerd-shim-runc-v2 /out/ctr /out/rootlesskit; do \
